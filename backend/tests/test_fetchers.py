@@ -58,7 +58,6 @@ MOCK_ISSUE = {
     "labels": [{"name": "bug"}, {"name": "performance"}],
     "created_at": "2025-01-15T10:00:00Z",
     "closed_at": None,
-    "pull_request": None,   # absence of this key = it's a real issue
 }
 
 

@@ -13,16 +13,12 @@ upsert idempotency if re-run.
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.github_client import GitHubClient
 from app.models.orm import Commit, File, Issue, PullRequest, Relationship, Repo
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +74,7 @@ async def fetch_and_store_issues(
             "repo_id": repo.id,
             "github_number": item["number"],
             "title": item["title"],
-            "body": item.get("body") or "",
+            "body": item.get("body"),
             "state": item["state"],
             "author": item["user"]["login"],
             "labels": [label["name"] for label in item.get("labels", [])],
