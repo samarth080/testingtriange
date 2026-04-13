@@ -14,6 +14,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select as sa_select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -144,7 +145,6 @@ async def fetch_and_store_pull_requests(
 
     Returns: count of PRs stored.
     """
-    from sqlalchemy import select as sa_select
 
     path = f"/repos/{repo.owner}/{repo.name}/pulls"
     params = {"state": "all", "sort": "created", "direction": "asc"}
