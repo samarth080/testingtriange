@@ -18,7 +18,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.ingestion.fetchers import fetch_and_store_issues
-from app.models.orm import Issue, Repo
+from app.models.orm import File, Issue, PullRequest, Relationship, Repo
 
 # Use NullPool so connections are never reused across event loops (one per test).
 # This prevents asyncpg "attached to a different loop" errors in function-scoped tests.
@@ -81,6 +81,9 @@ async def test_repo(db_session: AsyncSession):
     db_session.add(repo)
     await db_session.flush()
     yield repo
+    await db_session.execute(delete(Relationship).where(Relationship.repo_id == repo.id))
+    await db_session.execute(delete(PullRequest).where(PullRequest.repo_id == repo.id))
+    await db_session.execute(delete(File).where(File.repo_id == repo.id))
     await db_session.execute(delete(Issue).where(Issue.repo_id == repo.id))
     await db_session.execute(delete(Repo).where(Repo.id == repo.id))
     await db_session.commit()
@@ -134,3 +137,86 @@ async def test_fetch_issues_upserts_on_duplicate(db_session: AsyncSession, test_
     issue = result.scalar_one()
     assert issue.title == "Fix memory leak (updated)"
     assert issue.state == "closed"
+
+
+# ── PR Tests ─────────────────────────────────────────────────────────────────
+
+from app.ingestion.fetchers import fetch_and_store_pull_requests
+
+MOCK_PR = {
+    "number": 10,
+    "title": "Fix the leak",
+    "body": "Closes #42\n\nThis PR fixes the memory leak.",
+    "state": "closed",
+    "user": {"login": "bob"},
+    "merged_at": "2025-02-01T12:00:00Z",
+    "created_at": "2025-01-30T09:00:00Z",
+}
+
+MOCK_PR_FILES = [
+    {"filename": "src/server.py", "status": "modified"},
+    {"filename": "tests/test_server.py", "status": "modified"},
+]
+
+
+class MockGitHubClientWithPRFiles(MockGitHubClient):
+    """Extended mock that also handles the PR files sub-endpoint."""
+
+    async def paginate(self, path: str, params: dict | None = None) -> AsyncGenerator[dict, None]:
+        if "/pulls" in path and "/files" in path:
+            for f in MOCK_PR_FILES:
+                yield f
+        else:
+            async for item in super().paginate(path, params):
+                yield item
+
+
+@pytest.mark.asyncio
+async def test_fetch_prs_stores_pr(db_session: AsyncSession, test_repo: Repo):
+    client = MockGitHubClientWithPRFiles(prs=[MOCK_PR])
+    count = await fetch_and_store_pull_requests(db_session, test_repo, client)
+    assert count == 1
+    result = await db_session.execute(
+        select(PullRequest).where(PullRequest.repo_id == test_repo.id, PullRequest.github_number == 10)
+    )
+    pr = result.scalar_one()
+    assert pr.author == "bob"
+    assert pr.linked_issue_numbers == [42]
+
+
+@pytest.mark.asyncio
+async def test_fetch_prs_creates_issue_pr_edge(db_session: AsyncSession, test_repo: Repo):
+    """PR body with 'Closes #42' should create an issue_pr relationship."""
+    # First store issue #42 so we have its id
+    issue_client = MockGitHubClient(issues=[MOCK_ISSUE])
+    await fetch_and_store_issues(db_session, test_repo, issue_client)
+
+    pr_client = MockGitHubClientWithPRFiles(prs=[MOCK_PR])
+    await fetch_and_store_pull_requests(db_session, test_repo, pr_client)
+
+    # Check relationship was created
+    result = await db_session.execute(
+        select(Relationship).where(
+            Relationship.repo_id == test_repo.id,
+            Relationship.edge_type == "issue_pr",
+        )
+    )
+    rels = result.scalars().all()
+    assert len(rels) == 1
+    assert rels[0].target_type == "pull_request"
+
+
+@pytest.mark.asyncio
+async def test_fetch_prs_creates_pr_file_edges(db_session: AsyncSession, test_repo: Repo):
+    """Each file changed in a PR should create a pr_file relationship."""
+    client = MockGitHubClientWithPRFiles(prs=[MOCK_PR])
+    await fetch_and_store_pull_requests(db_session, test_repo, client)
+
+    result = await db_session.execute(
+        select(Relationship).where(
+            Relationship.repo_id == test_repo.id,
+            Relationship.edge_type == "pr_file",
+        )
+    )
+    rels = result.scalars().all()
+    assert len(rels) == 2  # MOCK_PR_FILES has 2 files

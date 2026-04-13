@@ -102,3 +102,148 @@ async def fetch_and_store_issues(
     await session.commit()
     logger.info("Stored %d issues for %s/%s", count, repo.owner, repo.name)
     return count
+
+
+async def upsert_relationship(
+    session: AsyncSession,
+    repo_id: int,
+    source_type: str,
+    source_id: int,
+    target_type: str,
+    target_id: int,
+    edge_type: str,
+) -> None:
+    """Insert a graph edge, silently skip if it already exists."""
+    stmt = (
+        insert(Relationship)
+        .values(
+            repo_id=repo_id,
+            source_type=source_type,
+            source_id=source_id,
+            target_type=target_type,
+            target_id=target_id,
+            edge_type=edge_type,
+        )
+        .on_conflict_do_nothing(constraint="uq_relationships")
+    )
+    await session.execute(stmt)
+
+
+async def fetch_and_store_pull_requests(
+    session: AsyncSession,
+    repo: Repo,
+    client: GitHubClient,
+) -> int:
+    """
+    Fetch all PRs and upsert into pull_requests table.
+
+    Also:
+    - Extracts linked issue numbers from PR body (closes/fixes/resolves #N)
+    - Creates issue_pr graph edges for each linked issue found in our DB
+    - Fetches PR file list and creates pr_file edges (creating File stubs if needed)
+
+    Returns: count of PRs stored.
+    """
+    from sqlalchemy import select as sa_select
+
+    path = f"/repos/{repo.owner}/{repo.name}/pulls"
+    params = {"state": "all", "sort": "created", "direction": "asc"}
+
+    count = 0
+    async for item in client.paginate(path, params):
+        linked_numbers = _extract_linked_issues(item.get("body"))
+
+        data = {
+            "repo_id": repo.id,
+            "github_number": item["number"],
+            "title": item["title"],
+            "body": item.get("body"),
+            "state": item["state"],
+            "author": item["user"]["login"],
+            "merged_at": _parse_dt(item.get("merged_at")),
+            "linked_issue_numbers": linked_numbers,
+            "created_at": _parse_dt(item["created_at"]),
+        }
+
+        stmt = (
+            insert(PullRequest)
+            .values(**data)
+            .on_conflict_do_update(
+                constraint="uq_prs_repo_number",
+                set_={
+                    "title": data["title"],
+                    "body": data["body"],
+                    "state": data["state"],
+                    "merged_at": data["merged_at"],
+                    "linked_issue_numbers": data["linked_issue_numbers"],
+                },
+            )
+            .returning(PullRequest.id)
+        )
+        result = await session.execute(stmt)
+        pr_id = result.scalar_one()
+
+        # issue_pr edges: find each linked issue in our DB and create an edge
+        for issue_number in linked_numbers:
+            issue_result = await session.execute(
+                sa_select(Issue.id).where(
+                    Issue.repo_id == repo.id,
+                    Issue.github_number == issue_number,
+                )
+            )
+            issue_id = issue_result.scalar_one_or_none()
+            if issue_id:
+                await upsert_relationship(
+                    session,
+                    repo_id=repo.id,
+                    source_type="issue",
+                    source_id=issue_id,
+                    target_type="pull_request",
+                    target_id=pr_id,
+                    edge_type="issue_pr",
+                )
+
+        # pr_file edges: fetch the list of files this PR changed
+        files_path = f"/repos/{repo.owner}/{repo.name}/pulls/{item['number']}/files"
+        async for file_item in client.paginate(files_path):
+            # Create File stub rows on the fly so we can store the pr_file edge
+            file_stmt = (
+                insert(File)
+                .values(
+                    repo_id=repo.id,
+                    path=file_item["filename"],
+                    language=None,
+                    content_hash=None,
+                    last_indexed_at=None,
+                )
+                .on_conflict_do_nothing(constraint="uq_files_repo_path")
+                .returning(File.id)
+            )
+            file_result = await session.execute(file_stmt)
+            file_id = file_result.scalar_one_or_none()
+
+            if file_id is None:
+                # Row already existed — fetch its id
+                existing = await session.execute(
+                    sa_select(File.id).where(
+                        File.repo_id == repo.id,
+                        File.path == file_item["filename"],
+                    )
+                )
+                file_id = existing.scalar_one()
+
+            await upsert_relationship(
+                session,
+                repo_id=repo.id,
+                source_type="pull_request",
+                source_id=pr_id,
+                target_type="file",
+                target_id=file_id,
+                edge_type="pr_file",
+            )
+
+        count += 1
+
+    await session.commit()
+    logger.info("Stored %d PRs for %s/%s", count, repo.owner, repo.name)
+    return count
