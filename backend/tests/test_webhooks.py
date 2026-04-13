@@ -8,6 +8,7 @@ We must reject requests with missing or wrong signatures with 401.
 import hashlib
 import hmac
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -110,14 +111,74 @@ async def test_installation_event_accepted(async_client):
         "installation": {"id": 99, "account": {"login": "owner"}},
         "repositories": [{"id": 1, "full_name": "owner/repo"}],
     }).encode()
-    async with async_client as client:
-        response = await client.post(
-            "/webhooks/github",
-            content=payload,
-            headers={
-                "X-Hub-Signature-256": _sign(payload),
-                "X-GitHub-Event": "installation",
-                "Content-Type": "application/json",
-            },
-        )
+
+    # Mock the DB session and backfill task to avoid real I/O
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = 1
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.api.webhooks.AsyncSessionLocal", return_value=mock_session_cm),
+        patch("app.api.webhooks.backfill_repo") as mock_task,
+    ):
+        async with async_client as client:
+            response = await client.post(
+                "/webhooks/github",
+                content=payload,
+                headers={
+                    "X-Hub-Signature-256": _sign(payload),
+                    "X-GitHub-Event": "installation",
+                    "Content-Type": "application/json",
+                },
+            )
     assert response.status_code == 202
+
+
+INSTALLATION_PAYLOAD = {
+    "action": "created",
+    "installation": {"id": 55555},
+    "repositories": [
+        {"id": 999001, "name": "myrepo", "full_name": "alice/myrepo"}
+    ],
+    "sender": {"login": "alice"},
+}
+
+
+@pytest.mark.asyncio
+async def test_installation_created_enqueues_backfill(async_client):
+    """Installation webhook must upsert Repo and enqueue backfill_repo task."""
+    body = json.dumps(INSTALLATION_PAYLOAD).encode()
+    sig = _sign(body)
+
+    # Mock the DB session to return a fake repo_id without hitting Postgres
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = 42
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.api.webhooks.AsyncSessionLocal", return_value=mock_session_cm),
+        patch("app.api.webhooks.backfill_repo") as mock_task,
+    ):
+        async with async_client as client:
+            response = await client.post(
+                "/webhooks/github",
+                content=body,
+                headers={
+                    "X-Hub-Signature-256": sig,
+                    "X-GitHub-Event": "installation",
+                    "Content-Type": "application/json",
+                },
+            )
+
+    assert response.status_code == 202
+    mock_task.delay.assert_called_once_with(42)

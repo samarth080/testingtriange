@@ -12,14 +12,19 @@ Async design: Handlers enqueue Celery tasks and return immediately — webhook
 requests must respond within 10 seconds or GitHub will retry. The actual
 triage work happens in the background worker.
 """
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.models.orm import Repo
+from app.workers.ingestion_tasks import backfill_repo
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +106,8 @@ async def _handle_installation(body: dict) -> Response:
     """
     Handle GitHub App installation events.
 
-    action=created → new repo installed → enqueue full backfill task (Day 2)
-    action=deleted → app uninstalled → mark repo inactive (Day 2)
+    action=created → upsert Repo rows + enqueue backfill_repo for each repo
+    action=deleted → log only (cleanup deferred to Day 8)
     """
     action = body.get("action")
     installation_id = body.get("installation", {}).get("id")
@@ -110,10 +115,47 @@ async def _handle_installation(body: dict) -> Response:
 
     logger.info(
         "Installation event: action=%s installation_id=%s repos=%s",
-        action, installation_id, [r.get("full_name") for r in repos]
+        action,
+        installation_id,
+        [r.get("full_name") for r in repos],
     )
 
-    # TODO Day 2: enqueue backfill_repo.delay(repo_id) for each repo
+    if action == "created" and repos:
+        async def _upsert_and_enqueue() -> None:
+            async with AsyncSessionLocal() as session:
+                for repo_data in repos:
+                    owner, name = repo_data["full_name"].split("/", 1)
+                    stmt = (
+                        pg_insert(Repo)
+                        .values(
+                            github_id=repo_data["id"],
+                            owner=owner,
+                            name=name,
+                            installation_id=installation_id,
+                            backfill_status="running",
+                        )
+                        .on_conflict_do_update(
+                            constraint="uq_repos_github_id",
+                            set_={
+                                "installation_id": installation_id,
+                                "backfill_status": "running",
+                            },
+                        )
+                        .returning(Repo.id)
+                    )
+                    result = await session.execute(stmt)
+                    repo_id = result.scalar_one()
+                    await session.commit()
+
+                    backfill_repo.delay(repo_id)
+                    logger.info(
+                        "Enqueued backfill_repo for repo_id=%d (%s)",
+                        repo_id,
+                        repo_data["full_name"],
+                    )
+
+        await _upsert_and_enqueue()
+
     return Response(status_code=202)
 
 
