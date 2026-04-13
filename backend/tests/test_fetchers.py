@@ -278,3 +278,55 @@ async def test_fetch_commits_upserts_on_duplicate(db_session: AsyncSession, test
     await fetch_and_store_commits(db_session, test_repo, client)
     count = await fetch_and_store_commits(db_session, test_repo, client)
     assert count == 1  # second run also returns 1 (upserted)
+
+
+# ── File fetcher tests ────────────────────────────────────────────────────────
+
+from app.ingestion.fetchers import fetch_and_store_files  # noqa: E402
+
+MOCK_TREE = {
+    "tree": [
+        {"path": "src/server.py", "type": "blob", "sha": "aaa111"},
+        {"path": "src/utils.py", "type": "blob", "sha": "bbb222"},
+        {"path": "README.md", "type": "blob", "sha": "ccc333"},
+        {"path": "src/", "type": "tree", "sha": "ddd444"},  # directory — must be skipped
+    ],
+    "truncated": False,
+}
+
+
+class MockGitHubClientWithTree(MockGitHubClient):
+    async def get(self, path: str) -> dict:
+        if "/git/trees" in path:
+            return MOCK_TREE
+        return {}
+
+
+@pytest.mark.asyncio
+async def test_fetch_files_stores_blobs_only(db_session: AsyncSession, test_repo: Repo):
+    """fetch_and_store_files skips 'tree' type entries, stores only 'blob'."""
+    client = MockGitHubClientWithTree()
+    count = await fetch_and_store_files(db_session, test_repo, client, default_branch="main")
+
+    assert count == 3  # 3 blobs, 1 tree entry skipped
+
+    result = await db_session.execute(
+        select(File).where(File.repo_id == test_repo.id)
+    )
+    files = result.scalars().all()
+    paths = {f.path for f in files}
+    assert "src/server.py" in paths
+    assert "src/" not in paths
+
+
+@pytest.mark.asyncio
+async def test_fetch_files_detects_language(db_session: AsyncSession, test_repo: Repo):
+    """Language is detected from file extension."""
+    client = MockGitHubClientWithTree()
+    await fetch_and_store_files(db_session, test_repo, client, default_branch="main")
+
+    result = await db_session.execute(
+        select(File).where(File.repo_id == test_repo.id, File.path == "src/server.py")
+    )
+    f = result.scalar_one()
+    assert f.language == "python"

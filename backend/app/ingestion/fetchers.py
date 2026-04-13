@@ -300,3 +300,82 @@ async def fetch_and_store_commits(
     await session.commit()
     logger.info("Stored %d commits for %s/%s", count, repo.owner, repo.name)
     return count
+
+
+# Extension → language name mapping
+_EXT_TO_LANG: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".jsx": "javascript",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".rb": "ruby",
+    ".md": "markdown",
+    ".yml": "yaml",
+    ".yaml": "yaml",
+    ".json": "json",
+    ".toml": "toml",
+    ".sh": "shell",
+    ".sql": "sql",
+}
+
+
+def _detect_language(path: str) -> str | None:
+    """Return a language name based on file extension, or None if unknown."""
+    from pathlib import PurePosixPath
+    suffix = PurePosixPath(path).suffix.lower()
+    return _EXT_TO_LANG.get(suffix)
+
+
+async def fetch_and_store_files(
+    session: AsyncSession,
+    repo: Repo,
+    client: GitHubClient,
+    default_branch: str = "main",
+) -> int:
+    """
+    Fetch the full repo file tree (recursive) and upsert File stubs.
+
+    Uses GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1
+    which returns all blob (file) and tree (directory) entries in one call.
+    We store only blob entries and detect language from extension.
+
+    content_hash and last_indexed_at are left None — they are populated
+    in Day 3 when we download and chunk file content.
+
+    Returns: count of files stored.
+    """
+    tree_data = await client.get(
+        f"/repos/{repo.owner}/{repo.name}/git/trees/{default_branch}?recursive=1"
+    )
+
+    count = 0
+    for entry in tree_data.get("tree", []):
+        if entry.get("type") != "blob":
+            continue  # Skip directories
+
+        data = {
+            "repo_id": repo.id,
+            "path": entry["path"],
+            "language": _detect_language(entry["path"]),
+            "content_hash": None,
+            "last_indexed_at": None,
+        }
+
+        stmt = (
+            insert(File)
+            .values(**data)
+            .on_conflict_do_update(
+                constraint="uq_files_repo_path",
+                set_={"language": data["language"]},
+            )
+        )
+        await session.execute(stmt)
+        count += 1
+
+    await session.commit()
+    logger.info("Stored %d files for %s/%s", count, repo.owner, repo.name)
+    return count
