@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from app.ingestion.github_client import _parse_next_url, GitHubClient
 
@@ -35,8 +35,14 @@ async def test_paginate_single_page():
     mock_response.json.return_value = page1
     mock_response.headers = {}
     mock_response.raise_for_status = MagicMock()
+    mock_response.status_code = 200
 
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+    with patch("app.ingestion.github_client.httpx.AsyncClient") as MockClient:
+        mock_instance = AsyncMock()
+        MockClient.return_value = mock_instance
+        mock_instance.get = AsyncMock(return_value=mock_response)
+        mock_instance.aclose = AsyncMock()
+
         client = GitHubClient(token="test-token")
         results = [item async for item in client.paginate("/repos/foo/bar/issues")]
 
@@ -53,14 +59,28 @@ async def test_paginate_two_pages():
     resp1.json.return_value = page1
     resp1.headers = {"Link": '<https://api.github.com/repos/foo/bar/issues?page=2>; rel="next"'}
     resp1.raise_for_status = MagicMock()
+    resp1.status_code = 200
 
     resp2 = MagicMock()
     resp2.json.return_value = page2
     resp2.headers = {}
     resp2.raise_for_status = MagicMock()
+    resp2.status_code = 200
 
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=[resp1, resp2]):
+    with patch("app.ingestion.github_client.httpx.AsyncClient") as MockClient:
+        mock_instance = AsyncMock()
+        MockClient.return_value = mock_instance
+        mock_instance.get = AsyncMock(side_effect=[resp1, resp2])
+        mock_instance.aclose = AsyncMock()
+
         client = GitHubClient(token="test-token")
         results = [item async for item in client.paginate("/repos/foo/bar/issues")]
 
     assert results == [{"id": 1}, {"id": 2}]
+
+    # Verify second call had empty params (pagination URL carries params itself)
+    calls = mock_instance.get.call_args_list
+    assert len(calls) == 2
+    # Second call: params should be {} (empty dict)
+    _, second_kwargs = calls[1]
+    assert second_kwargs.get("params") == {}
