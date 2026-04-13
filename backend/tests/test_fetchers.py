@@ -220,3 +220,61 @@ async def test_fetch_prs_creates_pr_file_edges(db_session: AsyncSession, test_re
     )
     rels = result.scalars().all()
     assert len(rels) == 2  # MOCK_PR_FILES has 2 files
+
+
+# ── Commit fetcher tests ──────────────────────────────────────────────────────
+
+from app.ingestion.fetchers import fetch_and_store_commits  # noqa: E402
+from app.models.orm import Commit  # noqa: E402
+
+MOCK_COMMIT = {
+    "sha": "abc123def456abc123def456abc123def456abc1",
+    "commit": {
+        "message": "fix: resolve memory leak in server.py",
+        "author": {
+            "name": "Bob Smith",
+            "email": "bob@example.com",
+            "date": "2025-01-20T08:00:00Z",
+        },
+    },
+    "author": {"login": "bob"},
+}
+
+
+class MockGitHubClientWithCommits(MockGitHubClient):
+    """Extended mock that handles the commits path."""
+
+    def __init__(self, commits: list[dict] | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self._commits = commits or []
+
+    async def paginate(self, path: str, params: dict | None = None):
+        if "/commits" in path and "/pulls" not in path:
+            for item in self._commits:
+                yield item
+        else:
+            async for item in super().paginate(path, params):
+                yield item
+
+
+@pytest.mark.asyncio
+async def test_fetch_commits_stores_commit(db_session: AsyncSession, test_repo: Repo):
+    client = MockGitHubClientWithCommits(commits=[MOCK_COMMIT])
+    count = await fetch_and_store_commits(db_session, test_repo, client)
+
+    assert count == 1
+    result = await db_session.execute(
+        select(Commit).where(Commit.repo_id == test_repo.id, Commit.sha == MOCK_COMMIT["sha"])
+    )
+    commit = result.scalar_one()
+    assert commit.message == "fix: resolve memory leak in server.py"
+    assert commit.author == "bob"
+
+
+@pytest.mark.asyncio
+async def test_fetch_commits_upserts_on_duplicate(db_session: AsyncSession, test_repo: Repo):
+    """Running fetch twice for the same sha must not raise an error."""
+    client = MockGitHubClientWithCommits(commits=[MOCK_COMMIT])
+    await fetch_and_store_commits(db_session, test_repo, client)
+    count = await fetch_and_store_commits(db_session, test_repo, client)
+    assert count == 1  # second run also returns 1 (upserted)

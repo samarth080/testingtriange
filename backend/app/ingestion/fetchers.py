@@ -247,3 +247,56 @@ async def fetch_and_store_pull_requests(
     await session.commit()
     logger.info("Stored %d PRs for %s/%s", count, repo.owner, repo.name)
     return count
+
+
+async def fetch_and_store_commits(
+    session: AsyncSession,
+    repo: Repo,
+    client: GitHubClient,
+) -> int:
+    """
+    Fetch commits from the last 2 years and upsert into the commits table.
+
+    GitHub's commit list endpoint returns basic info (sha, message, author, date).
+    changed_files is left empty here; it gets populated in Day 3 when we index
+    files and can derive commit→file relationships from the tree.
+
+    Returns: count of commits stored.
+    """
+    path = f"/repos/{repo.owner}/{repo.name}/commits"
+    params = {"since": BACKFILL_SINCE.strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    count = 0
+    async for item in client.paginate(path, params):
+        commit_data = item.get("commit", {})
+        author_data = commit_data.get("author", {})
+
+        # Prefer the GitHub login over git author name (login is more useful for attribution)
+        author_login = (item.get("author") or {}).get("login") or author_data.get("name", "unknown")
+
+        data = {
+            "repo_id": repo.id,
+            "sha": item["sha"],
+            "message": commit_data.get("message", ""),
+            "author": author_login,
+            "committed_at": _parse_dt(author_data.get("date")),
+            "changed_files": [],  # Populated in Day 3 during file indexing
+        }
+
+        stmt = (
+            insert(Commit)
+            .values(**data)
+            .on_conflict_do_update(
+                constraint="uq_commits_repo_sha",
+                set_={
+                    "message": data["message"],
+                    "author": data["author"],
+                },
+            )
+        )
+        await session.execute(stmt)
+        count += 1
+
+    await session.commit()
+    logger.info("Stored %d commits for %s/%s", count, repo.owner, repo.name)
+    return count
