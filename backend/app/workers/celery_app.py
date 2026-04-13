@@ -16,9 +16,8 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
-        # Task modules autodiscovered — add as implemented each day
-        # "app.workers.ingestion_tasks",  # Day 2
-        # "app.workers.triage_tasks",     # Day 5
+        "app.workers.ingestion_tasks",  # Day 2: backfill_repo task
+        # "app.workers.triage_tasks",   # Day 5
     ],
 )
 
