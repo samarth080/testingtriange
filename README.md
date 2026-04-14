@@ -112,6 +112,45 @@ docker compose up
 
 Go to your GitHub App → **Install App** → choose a repository. You should see an `installation` webhook arrive in your smee.io channel and a `202` response from the backend.
 
+## Day 2: Backfill Pipeline
+
+When a GitHub App installation event arrives, the webhook handler enqueues a Celery task that fetches the full history of the installed repo and stores it in Postgres.
+
+### What gets fetched
+
+| Entity | Source endpoint | Notes |
+|---|---|---|
+| Issues | `GET /repos/{owner}/{repo}/issues` | Last 2 years; skips PRs that appear in the same endpoint |
+| Pull Requests | `GET /repos/{owner}/{repo}/pulls` | All time; extracts `closes/fixes/resolves #N` links from PR body |
+| Commits | `GET /repos/{owner}/{repo}/commits` | Last 2 years; uses GitHub login over git author name |
+| Files | `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1` | Full tree; detects language from extension |
+
+### Graph edges created
+
+| Edge type | From → To | How |
+|---|---|---|
+| `issue_pr` | Issue → PullRequest | PR body regex: `closes/fixes/resolves #N` |
+| `pr_file` | PullRequest → File | `/pulls/{n}/files` endpoint |
+
+### Key components
+
+- [backend/app/ingestion/github_client.py](backend/app/ingestion/github_client.py) — Async GitHub API client with Link-header pagination and rate-limit retry (403/429 + `Retry-After`)
+- [backend/app/ingestion/fetchers.py](backend/app/ingestion/fetchers.py) — One function per entity type; all use `INSERT ... ON CONFLICT DO UPDATE`
+- [backend/app/workers/ingestion_tasks.py](backend/app/workers/ingestion_tasks.py) — Celery task `ingestion.backfill_repo`; retries up to 3× on failure
+- [backend/app/core/database.py](backend/app/core/database.py) — Async SQLAlchemy engine, session factory, FastAPI `get_db` dependency
+
+### Running the backfill manually
+
+```bash
+# From the backend virtualenv, with Redis + Postgres running
+celery -A app.workers.celery_app worker --loglevel=info &
+
+python - <<'EOF'
+from app.workers.ingestion_tasks import backfill_repo
+backfill_repo.delay(<repo_id>)   # repo_id from the repos table
+EOF
+```
+
 ## Running Tests
 
 ```bash
@@ -138,7 +177,7 @@ python run_eval.py --repo owner/repo --output results.md
 | Day | Status | Deliverable |
 |---|---|---|
 | 1 | ✅ | Scaffold, Docker Compose, webhook verification, schema, migrations |
-| 2 | ⬜ | Backfill pipeline (issues, PRs, commits, files) |
+| 2 | ✅ | Backfill pipeline (issues, PRs, commits, files) |
 | 3 | ⬜ | Chunkers (tree-sitter, markdown, discussion) + embeddings |
 | 4 | ⬜ | Hybrid retrieval (BM25 + dense + RRF) |
 | 5 | ⬜ | Graph expansion + reranker + LLM triage endpoint |
