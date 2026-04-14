@@ -54,3 +54,20 @@ async def test_async_backfill_repo_returns_summary():
     assert result["commits"] == 10
     assert result["files"] == 20
     assert result["repo_id"] == 1
+
+
+def test_backfill_repo_enqueues_index_task(monkeypatch):
+    """After a successful backfill, index_repo.delay() should be called."""
+    from app.workers.ingestion_tasks import backfill_repo
+
+    async def fake_async_backfill(repo_id):
+        return {"repo_id": repo_id, "issues": 0, "prs": 0, "commits": 0, "files": 0}
+
+    mock_delay = MagicMock()
+
+    monkeypatch.setattr("app.workers.ingestion_tasks._async_backfill_repo", fake_async_backfill)
+    monkeypatch.setattr("app.workers.ingestion_tasks.index_repo.delay", mock_delay)
+
+    backfill_repo(99)
+
+    mock_delay.assert_called_once_with(99)

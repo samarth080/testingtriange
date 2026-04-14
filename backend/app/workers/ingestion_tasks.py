@@ -24,6 +24,7 @@ from app.ingestion.fetchers import (
 )
 from app.models.orm import Repo
 from app.workers.celery_app import celery_app
+from app.workers.indexing_tasks import index_repo
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +83,13 @@ def backfill_repo(self, repo_id: int) -> dict:
     Celery task: fetch and store all GitHub data for a repo.
 
     Retries up to 3 times on transient errors (rate limits, network blips).
+    On success, enqueues index_repo to chunk and embed the stored data.
     bind=True gives access to self.retry().
     """
     try:
-        return asyncio.run(_async_backfill_repo(repo_id))
+        result = asyncio.run(_async_backfill_repo(repo_id))
+        index_repo.delay(repo_id)
+        return result
     except Exception as exc:
         logger.exception("Backfill failed for repo_id=%d: %s", repo_id, exc)
         raise self.retry(exc=exc, countdown=60)

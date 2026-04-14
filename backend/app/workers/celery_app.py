@@ -17,6 +17,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "app.workers.ingestion_tasks",  # Day 2: backfill_repo task
+        "app.workers.indexing_tasks",   # Day 3: index_repo task
         # "app.workers.triage_tasks",   # Day 5
     ],
 )
