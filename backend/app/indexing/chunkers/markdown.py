@@ -14,7 +14,7 @@ from app.indexing.chunkers import ChunkData
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
 
 # Default minimum section size before merging into previous chunk
-_DEFAULT_MIN_CHARS = 1
+_DEFAULT_MIN_CHARS = 100
 
 
 def chunk_markdown(text: str, min_chars: int = _DEFAULT_MIN_CHARS) -> list[ChunkData]:

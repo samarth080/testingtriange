@@ -18,7 +18,7 @@ def test_chunk_markdown_single_section():
 
 def test_chunk_markdown_multiple_headings():
     text = "# Setup\n\nInstall deps.\n\n## Config\n\nSet env vars.\n\n# Usage\n\nRun the app."
-    chunks = chunk_markdown(text)
+    chunks = chunk_markdown(text, min_chars=1)
     assert len(chunks) == 3
     assert chunks[0].metadata["heading"] == "Setup"
     assert chunks[1].metadata["heading"] == "Config"
