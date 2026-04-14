@@ -145,7 +145,9 @@ def chunk_code(source: str, language: str, file_path: str) -> list[ChunkData]:
     tree = parser.parse(source_bytes)
     root = tree.root_node
 
-    target_types = _TOP_LEVEL_TYPES.get(language, set())
+    # Normalize jsx→javascript, tsx→typescript for _TOP_LEVEL_TYPES lookup
+    _lang_key = {"jsx": "javascript", "tsx": "typescript"}.get(language, language)
+    target_types = _TOP_LEVEL_TYPES.get(_lang_key, set())
     extracted_nodes = []
 
     for node in root.children:
@@ -160,8 +162,16 @@ def chunk_code(source: str, language: str, file_path: str) -> list[ChunkData]:
     for node in extracted_nodes:
         node_text = source_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
         # Extract symbol name: first named child that is an identifier
+        # For decorated definitions, unwrap to find the actual function/class node
+        target_node = node
+        if node.type == "decorated_definition":
+            for child in node.children:
+                if child.type in ("function_definition", "class_definition", "async_function_definition"):
+                    target_node = child
+                    break
+
         symbol = ""
-        for child in node.children:
+        for child in target_node.children:
             if child.type in ("identifier", "name"):
                 symbol = source_bytes[child.start_byte : child.end_byte].decode("utf-8", errors="replace")
                 break
