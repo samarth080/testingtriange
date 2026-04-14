@@ -108,3 +108,102 @@ def test_chunk_pull_request_chunk_indices_are_sequential():
     )
     for i, c in enumerate(chunks):
         assert c.chunk_index == i
+
+
+from app.indexing.chunkers.code import chunk_code
+
+
+PYTHON_SOURCE = '''\
+def add(a, b):
+    """Add two numbers."""
+    return a + b
+
+
+class Calculator:
+    """Simple calculator."""
+
+    def multiply(self, x, y):
+        return x * y
+
+    def divide(self, x, y):
+        if y == 0:
+            raise ValueError("Cannot divide by zero")
+        return x / y
+'''
+
+JS_SOURCE = '''\
+function greet(name) {
+    return `Hello, ${name}!`;
+}
+
+class Greeter {
+    constructor(prefix) {
+        this.prefix = prefix;
+    }
+
+    greet(name) {
+        return `${this.prefix} ${name}`;
+    }
+}
+'''
+
+
+def test_chunk_code_python_extracts_functions_and_classes():
+    chunks = chunk_code(PYTHON_SOURCE, language="python", file_path="math.py")
+    texts = [c.text for c in chunks]
+    # Should have at least the top-level function and class
+    assert any("def add" in t for t in texts)
+    assert any("class Calculator" in t for t in texts)
+    for c in chunks:
+        assert c.metadata["language"] == "python"
+        assert c.metadata["file_path"] == "math.py"
+        assert "symbol" in c.metadata
+
+
+def test_chunk_code_javascript_extracts_nodes():
+    chunks = chunk_code(JS_SOURCE, language="javascript", file_path="greet.js")
+    texts = [c.text for c in chunks]
+    assert any("function greet" in t for t in texts)
+    assert any("class Greeter" in t for t in texts)
+
+
+def test_chunk_code_chunk_indices_are_sequential():
+    chunks = chunk_code(PYTHON_SOURCE, language="python", file_path="math.py")
+    for i, c in enumerate(chunks):
+        assert c.chunk_index == i
+
+
+def test_chunk_code_unknown_language_falls_back_to_line_windows():
+    source = "line\n" * 20
+    chunks = chunk_code(source, language="cobol", file_path="old.cbl")
+    assert len(chunks) >= 1
+    for c in chunks:
+        assert c.metadata["language"] == "cobol"
+
+
+def test_chunk_code_empty_source():
+    chunks = chunk_code("", language="python", file_path="empty.py")
+    assert chunks == []
+
+
+def test_chunk_code_go_extracts_functions():
+    go_source = '''\
+package main
+
+import "fmt"
+
+func hello(name string) string {
+    return fmt.Sprintf("Hello, %s!", name)
+}
+
+type Greeter struct {
+    Prefix string
+}
+
+func (g Greeter) Greet(name string) string {
+    return g.Prefix + " " + name
+}
+'''
+    chunks = chunk_code(go_source, language="go", file_path="main.go")
+    texts = [c.text for c in chunks]
+    assert any("func hello" in t for t in texts)
