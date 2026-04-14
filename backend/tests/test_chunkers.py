@@ -18,6 +18,9 @@ def test_chunk_markdown_single_section():
 
 def test_chunk_markdown_multiple_headings():
     text = "# Setup\n\nInstall deps.\n\n## Config\n\nSet env vars.\n\n# Usage\n\nRun the app."
+    # min_chars=1: the test bodies ("Install deps.", "Set env vars.", "Run the app.")
+    # are each < 100 chars and would merge under the production default.
+    # We pass min_chars=1 to keep the three sections separate for this structural test.
     chunks = chunk_markdown(text, min_chars=1)
     assert len(chunks) == 3
     assert chunks[0].metadata["heading"] == "Setup"

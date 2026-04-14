@@ -132,7 +132,7 @@ async def index_repo_files(
                 logger.debug("Skipping large file %s (%d bytes)", file.path, size)
                 continue
 
-            raw_b64 = data.get("content", "").replace("\n", "")
+            raw_b64 = (data.get("content") or "").replace("\n", "")
             if not raw_b64:
                 continue
 
