@@ -73,6 +73,8 @@ class QdrantStore:
         Returns:
             List of {"id": str, "score": float, "payload": dict} ordered by score desc.
         """
+        if k < 1:
+            raise ValueError(f"k must be >= 1, got {k}")
         results = await self._client.search(
             collection_name=collection,
             query_vector=query_vector,
@@ -83,7 +85,7 @@ class QdrantStore:
             with_payload=True,
         )
         return [
-            {"id": str(r.id), "score": r.score, "payload": r.payload}
+            {"id": str(r.id), "score": r.score, "payload": r.payload or {}}
             for r in results
         ]
 

@@ -38,6 +38,7 @@ async def test_dense_search_returns_ranked_list():
     assert pid == "uuid-1"
     assert score == 0.95
     assert returned_payload == payload
+    assert returned_payload["text"] == "def foo(): pass"  # pin payload is not corrupted
 
 
 @pytest.mark.asyncio
@@ -46,11 +47,12 @@ async def test_dense_search_passes_repo_filter_to_qdrant():
     await dense_search(store, "code_chunks", [0.0] * 1024, repo_id=42, k=5)
 
     call_kwargs = store._client.search.call_args.kwargs
-    # Filter must constrain to repo_id=42
     filter_conditions = call_kwargs["query_filter"].must
-    assert any(
-        getattr(c, "key", None) == "repo_id" for c in filter_conditions
+    repo_condition = next(
+        (c for c in filter_conditions if getattr(c, "key", None) == "repo_id"), None
     )
+    assert repo_condition is not None, "No repo_id filter condition found"
+    assert repo_condition.match.value == 42, f"Expected repo_id=42, got {repo_condition.match.value}"
 
 
 @pytest.mark.asyncio
