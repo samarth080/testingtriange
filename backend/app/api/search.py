@@ -7,7 +7,7 @@ Embedder and QdrantStore are constructed per-request from settings.
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -21,8 +21,8 @@ router = APIRouter()
 
 class SearchRequest(BaseModel):
     repo_id: int
-    query: str
-    k: int = 10
+    query: str = Field(..., min_length=1, max_length=2000)
+    k: int = Field(default=10, ge=1, le=100)
 
 
 @router.post("/search")

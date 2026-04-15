@@ -131,7 +131,7 @@ class Chunk(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     repo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("repos.id", ondelete="CASCADE"), nullable=False)
-    # code | discussion | doc | commit
+    # file | issue | pull_request
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
     # FK to the source row's id in issues/pull_requests/commits/files
     source_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
