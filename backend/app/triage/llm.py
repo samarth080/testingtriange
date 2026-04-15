@@ -38,6 +38,8 @@ async def triage_with_llm(
     )
 
     raw_text = message.content[0].text.strip()
+    # Strip markdown code fences that models sometimes include despite instructions
+    raw_text = raw_text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     logger.debug("LLM triage raw response: %s", raw_text)
 
     try:

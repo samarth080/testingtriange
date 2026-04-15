@@ -1,5 +1,5 @@
 """Pydantic v2 schema for structured LLM triage output."""
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -22,7 +22,7 @@ class TriageOutput(BaseModel):
         default_factory=list,
         description="GitHub usernames to suggest as assignees",
     )
-    confidence: str = Field(
+    confidence: Literal["low", "medium", "high"] = Field(
         default="medium",
         description="Confidence level: low | medium | high",
     )
