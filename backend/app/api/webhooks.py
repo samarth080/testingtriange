@@ -19,11 +19,12 @@ import json
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.orm import Repo
+from app.models.orm import Issue, Repo
 from app.workers.ingestion_tasks import backfill_repo
 
 logger = logging.getLogger(__name__)
@@ -163,20 +164,68 @@ async def _handle_issues(body: dict) -> Response:
     """
     Handle GitHub issues events.
 
-    action=opened → new issue → enqueue triage task (Day 5)
-    Other actions (edited, closed, etc.) → no-op for now
+    action=opened: upsert the issue into Postgres then enqueue triage_issue.
+    Other actions: no-op.
     """
     action = body.get("action")
-    issue_number = body.get("issue", {}).get("number")
-    repo_full_name = body.get("repository", {}).get("full_name")
+    issue_data = body.get("issue", {})
+    repo_data = body.get("repository", {})
 
     logger.info(
         "Issues event: action=%s issue=#%s repo=%s",
-        action, issue_number, repo_full_name
+        action, issue_data.get("number"), repo_data.get("full_name"),
     )
 
     if action == "opened":
-        # TODO Day 5: enqueue triage_issue.delay(issue_id) after storing the issue
-        pass
+        await _upsert_and_triage(issue_data, repo_data)
 
     return Response(status_code=202)
+
+
+async def _upsert_and_triage(issue_data: dict, repo_data: dict) -> None:
+    """Upsert the new issue into Postgres and enqueue triage_issue Celery task."""
+    from app.workers.triage_tasks import triage_issue
+
+    async with AsyncSessionLocal() as session:
+        repo_lookup = await session.execute(
+            select(Repo).where(Repo.github_id == repo_data["id"])
+        )
+        repo = repo_lookup.scalar_one_or_none()
+        if not repo:
+            logger.warning(
+                "Received issues event for unknown repo github_id=%d (%s) — ignoring",
+                repo_data["id"], repo_data.get("full_name"),
+            )
+            return
+
+        stmt = (
+            pg_insert(Issue)
+            .values(
+                repo_id=repo.id,
+                github_number=issue_data["number"],
+                title=issue_data["title"],
+                body=issue_data.get("body"),
+                state=issue_data["state"],
+                author=issue_data["user"]["login"],
+                labels=[lbl["name"] for lbl in issue_data.get("labels", [])],
+                created_at=issue_data["created_at"],
+            )
+            .on_conflict_do_update(
+                constraint="uq_issues_repo_number",
+                set_={
+                    "title": issue_data["title"],
+                    "body": issue_data.get("body"),
+                    "state": issue_data["state"],
+                    "labels": [lbl["name"] for lbl in issue_data.get("labels", [])],
+                },
+            )
+            .returning(Issue.id)
+        )
+        issue_result = await session.execute(stmt)
+        issue_id = issue_result.scalar_one()
+        await session.commit()
+
+    triage_issue.delay(repo.id, issue_id)
+    logger.info(
+        "Enqueued triage_issue for issue_id=%d (#%d)", issue_id, issue_data["number"]
+    )
