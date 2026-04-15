@@ -106,6 +106,7 @@ async def test_graph_expand_deduplicates_already_seen_chunk():
     results = [make_result(1, "issue", 10)]
     expanded = await graph_expand(session, results, repo_id=1)
     assert len(expanded) == 1  # no new chunk added
+    assert session.execute.call_count == 2  # relationships + chunks; no entity queries (all deduped)
 
 
 @pytest.mark.asyncio
