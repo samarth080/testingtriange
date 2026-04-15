@@ -59,9 +59,9 @@ async def retrieve(
     sparse = await sparse_search(session, repo_id, query, n_candidates)
 
     # Extract ordered ID lists for RRF (each list preserves rank order)
-    code_ids = [pid for pid, _score, _payload in dense_code]
-    disc_ids = [pid for pid, _score, _payload in dense_disc]
-    sparse_ids = [pid for pid, _score in sparse]
+    code_ids = [str(pid) for pid, _score, _payload in dense_code]
+    disc_ids = [str(pid) for pid, _score, _payload in dense_disc]
+    sparse_ids = [str(pid) for pid, _score in sparse]
 
     fused = rrf_fuse(code_ids, disc_ids, sparse_ids)
     top_k = fused[:k]
