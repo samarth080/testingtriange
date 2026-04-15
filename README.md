@@ -179,7 +179,7 @@ python run_eval.py --repo owner/repo --output results.md
 | 1 | ✅ | Scaffold, Docker Compose, webhook verification, schema, migrations |
 | 2 | ✅ | Backfill pipeline (issues, PRs, commits, files) |
 | 3 | ✅ | Chunkers (tree-sitter, markdown, discussion) + embeddings |
-| 4 | ⬜ | Hybrid retrieval (BM25 + dense + RRF) |
+| 4 | ✅ | Hybrid retrieval (BM25 + dense + RRF) |
 | 5 | ⬜ | Graph expansion + reranker + LLM triage endpoint |
 | 6 | ⬜ | End-to-end webhook → comment flow |
 | 7 | ⬜ | Eval harness + baseline metrics |
