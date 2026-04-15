@@ -54,10 +54,13 @@ async def _cohere_rerank(
     api_key: str,
 ) -> list[SearchResult]:
     client = cohere.AsyncClientV2(api_key=api_key)
-    response = await client.rerank(
-        model="rerank-english-v3.0",
-        query=query,
-        documents=[r.text for r in results],
-        top_n=top_n,
-    )
-    return [results[item.index] for item in response.results]
+    try:
+        response = await client.rerank(
+            model="rerank-english-v3.0",
+            query=query,
+            documents=[r.text for r in results],
+            top_n=top_n,
+        )
+        return [results[item.index] for item in response.results]
+    finally:
+        await client.close()
