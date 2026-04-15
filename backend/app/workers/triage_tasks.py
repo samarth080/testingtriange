@@ -25,11 +25,15 @@ async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
     async with AsyncSessionLocal() as session:
         repo = await session.get(Repo, repo_id)
         if not repo:
+            # Not retrying: if the repo doesn't exist at task run time, retrying won't help.
+            # The delay() call in webhooks.py only fires after a successful DB commit.
             logger.error("Repo id=%d not found — skipping triage", repo_id)
             return {"error": "repo_not_found"}
 
         issue = await session.get(Issue, issue_id)
         if not issue:
+            # Not retrying: if the issue doesn't exist at task run time, retrying won't help.
+            # The delay() call in webhooks.py only fires after a successful DB commit.
             logger.error("Issue id=%d not found — skipping triage", issue_id)
             return {"error": "issue_not_found"}
 
@@ -43,18 +47,19 @@ async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
             embedder=embedder, qdrant=qdrant, cfg=settings,
         )
 
+        output_dict = triage_output.model_dump()
         stmt = (
             pg_insert(TriageResult)
             .values(
                 repo_id=repo_id,
                 issue_id=issue_id,
-                output=triage_output.model_dump(),
+                output=output_dict,
                 latency_ms=latency_ms,
             )
             .on_conflict_do_update(
                 constraint="uq_triage_results_issue",
                 set_={
-                    "output": triage_output.model_dump(),
+                    "output": output_dict,
                     "latency_ms": latency_ms,
                 },
             )
@@ -82,4 +87,4 @@ def triage_issue(self, repo_id: int, issue_id: int) -> dict:
         return asyncio.run(_async_triage_issue(repo_id, issue_id))
     except Exception as exc:
         logger.exception("Triage failed for issue_id=%d: %s", issue_id, exc)
-        raise self.retry(exc=exc, countdown=30)
+        raise self.retry(exc=exc, countdown=60)  # 60s matches project-wide retry convention

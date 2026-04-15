@@ -90,16 +90,17 @@ async def test_issues_opened_event_accepted(async_client):
         "repository": {"id": 1, "full_name": "owner/repo"},
         "installation": {"id": 99},
     }).encode()
-    async with async_client as client:
-        response = await client.post(
-            "/webhooks/github",
-            content=payload,
-            headers={
-                "X-Hub-Signature-256": _sign(payload),
-                "X-GitHub-Event": "issues",
-                "Content-Type": "application/json",
-            },
-        )
+    with patch("app.api.webhooks._upsert_and_triage", new_callable=AsyncMock):
+        async with async_client as client:
+            response = await client.post(
+                "/webhooks/github",
+                content=payload,
+                headers={
+                    "X-Hub-Signature-256": _sign(payload),
+                    "X-GitHub-Event": "issues",
+                    "Content-Type": "application/json",
+                },
+            )
     assert response.status_code == 202
 
 
