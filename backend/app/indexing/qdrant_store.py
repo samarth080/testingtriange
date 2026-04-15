@@ -60,6 +60,33 @@ class QdrantStore:
         ]
         await self._client.upsert(collection_name=collection, points=structs)
 
+    async def search(
+        self,
+        collection: str,
+        query_vector: list[float],
+        repo_id: int,
+        k: int,
+    ) -> list[dict]:
+        """
+        Search for nearest neighbours in a collection, filtered to a single repo.
+
+        Returns:
+            List of {"id": str, "score": float, "payload": dict} ordered by score desc.
+        """
+        results = await self._client.search(
+            collection_name=collection,
+            query_vector=query_vector,
+            query_filter=Filter(
+                must=[FieldCondition(key="repo_id", match=MatchValue(value=repo_id))]
+            ),
+            limit=k,
+            with_payload=True,
+        )
+        return [
+            {"id": str(r.id), "score": r.score, "payload": r.payload}
+            for r in results
+        ]
+
     async def delete_repo_points(self, repo_id: int) -> None:
         condition = Filter(
             must=[FieldCondition(key="repo_id", match=MatchValue(value=repo_id))]
