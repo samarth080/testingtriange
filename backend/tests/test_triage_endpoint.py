@@ -66,6 +66,7 @@ async def test_triage_endpoint_returns_200_with_structured_output():
     assert data["relevant_files"] == ["src/server.py"]
     assert data["issue_github_number"] == 42
     assert data["latency_ms"] == 450
+    mock_session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
