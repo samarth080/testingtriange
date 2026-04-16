@@ -17,6 +17,7 @@ from app.indexing.embedder import embedder_from_settings
 from app.indexing.qdrant_store import QdrantStore
 from app.models.orm import Issue, Repo, TriageResult
 from app.triage.formatter import format_triage_comment
+from app.cache.semantic_cache import SemanticCache
 from app.triage.pipeline import run_triage_pipeline
 from app.workers.celery_app import celery_app
 
@@ -50,11 +51,15 @@ async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
 
         embedder = embedder_from_settings()
         qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension)
+        cache = SemanticCache(redis_url=settings.redis_url, ttl=settings.semantic_cache_ttl)
 
-        triage_output, latency_ms = await run_triage_pipeline(
-            session=session, repo_id=repo_id, issue=issue,
-            embedder=embedder, qdrant=qdrant, cfg=settings,
-        )
+        try:
+            triage_output, latency_ms = await run_triage_pipeline(
+                session=session, repo_id=repo_id, issue=issue,
+                embedder=embedder, qdrant=qdrant, cfg=settings, cache=cache,
+            )
+        finally:
+            await cache.close()
 
         output_dict = triage_output.model_dump()
         stmt = (

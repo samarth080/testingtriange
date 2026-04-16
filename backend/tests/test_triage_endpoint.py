@@ -49,9 +49,12 @@ async def test_triage_endpoint_returns_200_with_structured_output():
     try:
         with patch("app.api.triage.embedder_from_settings"), \
              patch("app.api.triage.QdrantStore"), \
+             patch("app.api.triage.SemanticCache") as mock_cache_cls, \
              patch("app.api.triage.run_triage_pipeline") as mock_pipeline, \
              patch("app.api.triage.settings"):
 
+            mock_cache_instance = AsyncMock()
+            mock_cache_cls.return_value = mock_cache_instance
             mock_pipeline.return_value = (VALID_OUTPUT, 450)
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

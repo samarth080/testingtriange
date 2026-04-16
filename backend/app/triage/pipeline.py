@@ -1,10 +1,13 @@
 """
 Shared async triage pipeline called by both the API endpoint and Celery task.
 
-Pipeline: retrieve() -> graph_expand() -> rerank() -> triage_with_llm()
+Pipeline: cache_check -> retrieve() -> graph_expand() -> rerank() -> triage_with_llm() -> cache_set
 """
+from __future__ import annotations
+
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +20,9 @@ from app.retrieval.graph import graph_expand
 from app.retrieval.reranker import rerank
 from app.triage.llm import triage_with_llm
 from app.triage.schemas import TriageOutput
+
+if TYPE_CHECKING:
+    from app.cache.semantic_cache import SemanticCache
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +37,26 @@ async def run_triage_pipeline(
     embedder: Embedder,
     qdrant: QdrantStore,
     cfg: Settings,
+    cache: "SemanticCache | None" = None,
 ) -> tuple[TriageOutput, int]:
     """
     Run the full triage pipeline for a single issue.
+
+    If `cache` is provided, checks for a cached result before running the
+    pipeline. On a miss, runs the pipeline and stores the result.
+    Cache hits return latency_ms=0.
 
     Returns: (TriageOutput, latency_ms)
     """
     start_ms = int(time.monotonic() * 1000)
     query = f"{issue.title}\n{issue.body or ''}"
+
+    if cache is not None:
+        cache_key = cache.cache_key(repo_id, query)
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            logger.info("Cache hit for issue #%d", issue.github_number)
+            return cached, 0
 
     results = await retrieve(
         session=session, qdrant=qdrant, embedder=embedder,
@@ -59,6 +77,9 @@ async def run_triage_pipeline(
         context_results=reranked,
         api_key=cfg.anthropic_api_key,
     )
+
+    if cache is not None:
+        await cache.set(cache_key, triage_output)
 
     latency_ms = int(time.monotonic() * 1000) - start_ms
     logger.info(
