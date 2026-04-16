@@ -18,7 +18,7 @@ celery_app = Celery(
     include=[
         "app.workers.ingestion_tasks",  # Day 2: backfill_repo task
         "app.workers.indexing_tasks",   # Day 3: index_repo task
-        # "app.workers.triage_tasks",   # Day 5
+        "app.workers.triage_tasks",     # Day 5: triage_issue task
     ],
 )
 
