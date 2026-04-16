@@ -17,11 +17,11 @@ check() {
     local expected="$5"
 
     if [ -n "$body" ]; then
-        status=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" \
+        status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 -X "$method" \
             -H "Content-Type: application/json" \
-            -d "$body" "$url")
+            -d "$body" "$url") || status="000"
     else
-        status=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url")
+        status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 -X "$method" "$url") || status="000"
     fi
 
     if [ "$status" = "$expected" ]; then
