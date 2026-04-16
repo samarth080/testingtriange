@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from sqlalchemy import select
@@ -210,7 +211,7 @@ async def _upsert_and_triage(issue_data: dict, repo_data: dict) -> None:
                 state=issue_data["state"],
                 author=issue_data["user"]["login"],
                 labels=[lbl["name"] for lbl in issue_data.get("labels", [])],
-                created_at=issue_data["created_at"],
+                created_at=datetime.fromisoformat(issue_data["created_at"].replace("Z", "+00:00")),
             )
             .on_conflict_do_update(
                 constraint="uq_issues_repo_number",
