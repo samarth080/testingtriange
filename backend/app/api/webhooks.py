@@ -94,8 +94,10 @@ async def github_webhook(
     if event == "issues":
         return await _handle_issues(body)
 
-    if event in ("pull_request", "push"):
-        # Will be wired to index-update tasks in Day 2
+    if event == "push":
+        return await _handle_push(body)
+
+    if event == "pull_request":
         return Response(status_code=202)
 
     # Unknown events: acknowledge so GitHub stops retrying
@@ -229,3 +231,31 @@ async def _upsert_and_triage(issue_data: dict, repo_data: dict) -> None:
     logger.info(
         "Enqueued triage_issue for issue_id=%d (#%d)", issue_id, issue_data["number"]
     )
+
+
+async def _handle_push(body: dict) -> Response:
+    """
+    Handle GitHub push events.
+
+    Enqueues incremental_index_repo for the repo that received the push,
+    so newly added files and issues are indexed without a full re-backfill.
+    """
+    repo_data = body.get("repository", {})
+    github_id = repo_data.get("id")
+    if not github_id:
+        return Response(status_code=202)
+
+    from app.workers.incremental_tasks import incremental_index_repo
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Repo).where(Repo.github_id == github_id))
+        repo = result.scalar_one_or_none()
+        if repo:
+            incremental_index_repo.delay(repo.id)
+            logger.info(
+                "Enqueued incremental_index_repo for repo_id=%d on push event", repo.id
+            )
+        else:
+            logger.debug("Push event for unknown repo github_id=%d — ignoring", github_id)
+
+    return Response(status_code=202)

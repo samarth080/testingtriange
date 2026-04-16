@@ -15,7 +15,8 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import exists as sa_exists
+from sqlalchemy import not_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,12 +108,16 @@ async def index_repo_files(
     embedder: Embedder,
     qdrant: QdrantStore,
     default_branch: str = "main",
+    incremental: bool = False,
 ) -> int:
     """
     Download, chunk, embed, and store all indexable files for a repo.
 
     Only processes files with a known language (language IS NOT NULL).
     Skips files larger than MAX_FILE_SIZE_BYTES.
+
+    When incremental=True, skips files that already have last_indexed_at set,
+    so only newly added files are processed.
 
     Returns: count of files indexed.
     """
@@ -123,6 +128,9 @@ async def index_repo_files(
 
     indexed = 0
     for file in files:
+        # Incremental mode: skip files already indexed (last_indexed_at is set)
+        if incremental and file.last_indexed_at is not None:
+            continue
         try:
             path = f"/repos/{repo.owner}/{repo.name}/contents/{file.path}?ref={default_branch}"
             data = await github_client.get(path)
@@ -179,15 +187,38 @@ async def index_repo_discussions(
     repo: Repo,
     embedder: Embedder,
     qdrant: QdrantStore,
+    incremental: bool = False,
 ) -> dict:
     """
     Chunk, embed, and store all issues and PRs for a repo.
 
+    When incremental=True, skips issues and PRs that already have chunks in the
+    database (determined via NOT EXISTS subquery on the Chunk table).
+
     Returns: {"issues": count, "pull_requests": count}
     """
-    issues_result = await session.execute(
-        select(Issue).where(Issue.repo_id == repo.id)
-    )
+    if incremental:
+        issues_stmt = select(Issue).where(
+            Issue.repo_id == repo.id,
+            not_(
+                sa_exists().where(
+                    (Chunk.source_type == "issue") & (Chunk.source_id == Issue.id)
+                )
+            ),
+        )
+        prs_stmt = select(PullRequest).where(
+            PullRequest.repo_id == repo.id,
+            not_(
+                sa_exists().where(
+                    (Chunk.source_type == "pull_request") & (Chunk.source_id == PullRequest.id)
+                )
+            ),
+        )
+    else:
+        issues_stmt = select(Issue).where(Issue.repo_id == repo.id)
+        prs_stmt = select(PullRequest).where(PullRequest.repo_id == repo.id)
+
+    issues_result = await session.execute(issues_stmt)
     issues = issues_result.scalars().all()
 
     issue_count = 0
@@ -217,9 +248,7 @@ async def index_repo_discussions(
             logger.exception("Failed to index issue #%d", issue.github_number)
             continue
 
-    prs_result = await session.execute(
-        select(PullRequest).where(PullRequest.repo_id == repo.id)
-    )
+    prs_result = await session.execute(prs_stmt)
     prs = prs_result.scalars().all()
 
     pr_count = 0
