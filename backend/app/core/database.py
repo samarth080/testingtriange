@@ -39,7 +39,9 @@ def make_worker_session() -> async_sessionmaker:
     causes 'Future attached to a different loop' errors in child processes.
     NullPool avoids this by never reusing connections across asyncio.run() calls.
     """
-    worker_engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    worker_engine = create_async_engine(
+        settings.database_url, poolclass=NullPool, pool_pre_ping=False
+    )
     return async_sessionmaker(worker_engine, expire_on_commit=False)
 
 
