@@ -158,6 +158,44 @@ cd backend
 pytest tests/ -v
 ```
 
+## Running the Full Stack
+
+```bash
+# Start all services (Postgres, Redis, Qdrant, backend, worker, frontend)
+docker compose up
+
+# Backend API:   http://localhost:8000
+# Frontend:      http://localhost:3000
+# API docs:      http://localhost:8000/docs
+```
+
+### Frontend dev mode (faster iteration)
+
+```bash
+# Terminal 1: infrastructure
+docker compose up postgres redis qdrant
+
+# Terminal 2: backend
+cd backend && uvicorn app.main:app --reload
+
+# Terminal 3: frontend
+cd frontend && cp .env.local.example .env.local && npm run dev
+```
+
+### Smoke test
+
+```bash
+# With backend running on port 8000:
+./scripts/smoke_test.sh
+```
+
+### Integration tests (require live Postgres + Qdrant)
+
+```bash
+cd backend
+pytest tests/ -m integration -v
+```
+
 ## Evaluation
 
 ```bash
@@ -185,4 +223,4 @@ python run_eval.py --repo owner/repo --output results.md
 | 7 | ✅ | Eval harness + baseline metrics |
 | 8 | ✅ | Calibration + incremental indexing + semantic cache |
 | 9 | ✅ | Next.js dashboard |
-| 10 | ⬜ | Deploy + GitHub App listing + demo video |
+| 10 | ✅ | Final polish: clean test suite, CORS, Docker full-stack, smoke tests |
