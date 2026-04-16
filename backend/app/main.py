@@ -6,6 +6,7 @@ import in webhooks.py does not break the health endpoint.
 """
 from fastapi import FastAPI
 
+from app.api.dashboard import router as dashboard_router
 from app.api.health import router as health_router
 from app.api.search import router as search_router
 from app.api.triage import router as triage_router
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(webhook_router)
     app.include_router(search_router)
     app.include_router(triage_router)
+    app.include_router(dashboard_router)
     return app
 
 
