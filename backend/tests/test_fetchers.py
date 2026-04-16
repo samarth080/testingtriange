@@ -20,6 +20,8 @@ from app.core.config import settings
 from app.ingestion.fetchers import fetch_and_store_issues
 from app.models.orm import File, Issue, PullRequest, Relationship, Repo
 
+pytestmark = pytest.mark.integration
+
 # Use NullPool so connections are never reused across event loops (one per test).
 # This prevents asyncpg "attached to a different loop" errors in function-scoped tests.
 _test_engine = create_async_engine(settings.database_url, poolclass=NullPool)

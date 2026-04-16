@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.indexing.qdrant_store import CODE_COLLECTION, DISCUSSION_COLLECTION
 from app.models.orm import Chunk, File, Issue, PullRequest, Repo
 
+pytestmark = pytest.mark.integration
+
 _test_engine = create_async_engine(settings.database_url, poolclass=NullPool)
 _TestSessionLocal = async_sessionmaker(_test_engine, expire_on_commit=False)
 
