@@ -1,4 +1,5 @@
-const API_URL = process.env.API_URL ?? 'http://localhost:8000'
+import Link from 'next/link'
+import { API_URL } from '@/lib/api'
 
 interface Repo {
   id: number
@@ -27,7 +28,7 @@ export default async function HomePage() {
       ) : (
         <div className="grid gap-4">
           {repos.map((repo) => (
-            <a
+            <Link
               key={repo.id}
               href={`/repos/${repo.id}`}
               className="block bg-white rounded-lg border border-gray-200 px-6 py-4 hover:border-blue-400 hover:shadow-sm transition-all"
@@ -49,7 +50,7 @@ export default async function HomePage() {
               <p className="text-sm text-gray-500 mt-1">
                 Indexed {new Date(repo.created_at).toLocaleDateString()}
               </p>
-            </a>
+            </Link>
           ))}
         </div>
       )}

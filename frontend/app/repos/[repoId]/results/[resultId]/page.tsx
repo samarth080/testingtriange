@@ -1,4 +1,5 @@
-const API_URL = process.env.API_URL ?? 'http://localhost:8000'
+import Link from 'next/link'
+import { API_URL } from '@/lib/api'
 
 interface TriageDetail {
   id: number
@@ -42,9 +43,9 @@ export default async function ResultDetailPage({
   if (!detail) {
     return (
       <div>
-        <a href={`/repos/${params.repoId}`} className="text-sm text-blue-600 hover:underline">
+        <Link href={`/repos/${params.repoId}`} className="text-sm text-blue-600 hover:underline">
           ← Triage history
-        </a>
+        </Link>
         <p className="mt-4 text-gray-500">Result not found.</p>
       </div>
     )
@@ -53,9 +54,9 @@ export default async function ResultDetailPage({
   return (
     <div>
       <div className="mb-6">
-        <a href={`/repos/${params.repoId}`} className="text-sm text-blue-600 hover:underline">
+        <Link href={`/repos/${params.repoId}`} className="text-sm text-blue-600 hover:underline">
           ← Triage history
-        </a>
+        </Link>
         <h1 className="text-2xl font-bold text-gray-900 mt-2">
           #{detail.github_number}: {detail.title}
         </h1>

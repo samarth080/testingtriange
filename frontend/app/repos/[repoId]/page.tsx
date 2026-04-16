@@ -1,4 +1,5 @@
-const API_URL = process.env.API_URL ?? 'http://localhost:8000'
+import Link from 'next/link'
+import { API_URL } from '@/lib/api'
 
 interface TriageRow {
   id: number
@@ -35,9 +36,9 @@ export default async function RepoPage({
   return (
     <div>
       <div className="mb-6">
-        <a href="/" className="text-sm text-blue-600 hover:underline">
+        <Link href="/" className="text-sm text-blue-600 hover:underline">
           ← All repositories
-        </a>
+        </Link>
         <h1 className="text-2xl font-bold text-gray-900 mt-2">Triage History</h1>
       </div>
 
@@ -63,12 +64,12 @@ export default async function RepoPage({
                 <tr key={row.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-500">#{row.github_number}</td>
                   <td className="px-4 py-3">
-                    <a
+                    <Link
                       href={`/repos/${params.repoId}/results/${row.id}`}
                       className="text-blue-600 hover:underline font-medium"
                     >
                       {row.title}
-                    </a>
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     <span
