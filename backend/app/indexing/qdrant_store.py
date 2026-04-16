@@ -75,9 +75,9 @@ class QdrantStore:
         """
         if k < 1:
             raise ValueError(f"k must be >= 1, got {k}")
-        results = await self._client.search(
+        response = await self._client.query_points(
             collection_name=collection,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=Filter(
                 must=[FieldCondition(key="repo_id", match=MatchValue(value=repo_id))]
             ),
@@ -86,7 +86,7 @@ class QdrantStore:
         )
         return [
             {"id": str(r.id), "score": r.score, "payload": r.payload or {}}
-            for r in results
+            for r in response.points
         ]
 
     async def delete_repo_points(self, repo_id: int) -> None:
