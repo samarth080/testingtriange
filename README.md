@@ -182,7 +182,7 @@ python run_eval.py --repo owner/repo --output results.md
 | 4 | ✅ | Hybrid retrieval (BM25 + dense + RRF) |
 | 5 | ✅ | Graph expansion + reranker + LLM triage endpoint |
 | 6 | ✅ | End-to-end webhook → comment flow |
-| 7 | ⬜ | Eval harness + baseline metrics |
+| 7 | ✅ | Eval harness + baseline metrics |
 | 8 | ⬜ | Calibration + incremental indexing + semantic cache |
 | 9 | ⬜ | Next.js dashboard |
 | 10 | ⬜ | Deploy + GitHub App listing + demo video |
