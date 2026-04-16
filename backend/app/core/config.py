@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     # ── LLM ───────────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
 
+    # ── Calibration ───────────────────────────────────────────────────────────
+    # Minimum confidence level before posting a GitHub comment.
+    # Values: "low" (always post) | "medium" | "high" (only post high-confidence)
+    min_confidence: str = "low"
+
+    # ── Semantic cache ────────────────────────────────────────────────────────
+    semantic_cache_ttl: int = 3600  # seconds
+
     @property
     def embedding_provider(self) -> str:
         """Return which embedding provider to use based on available API keys."""

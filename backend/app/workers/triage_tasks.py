@@ -22,6 +22,13 @@ from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+_CONFIDENCE_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+def _meets_confidence_threshold(output_confidence: str, min_confidence: str) -> bool:
+    """Return True if output_confidence >= min_confidence in the low→high ranking."""
+    return _CONFIDENCE_RANK.get(output_confidence, 0) >= _CONFIDENCE_RANK.get(min_confidence, 0)
+
 
 async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
     async with AsyncSessionLocal() as session:
@@ -77,28 +84,35 @@ async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
             "latency_ms": latency_ms,
         }
 
-        # Post comment to GitHub — non-fatal: triage data is already saved
-        try:
-            comment_body = format_triage_comment(triage_output, issue.github_number)
-            comment_url = await post_issue_comment(
-                owner=repo.owner,
-                repo=repo.name,
-                issue_number=issue.github_number,
-                body=comment_body,
-                installation_id=repo.installation_id,
-            )
-            from sqlalchemy import update
-            await session.execute(
-                update(TriageResult)
-                .where(TriageResult.issue_id == issue_id)
-                .values(comment_url=comment_url)
-            )
-            await session.commit()
-            result["comment_url"] = comment_url
-        except Exception as exc:
-            logger.warning(
-                "Failed to post triage comment for issue #%d: %s",
-                issue.github_number, exc,
+        # Post comment to GitHub only if confidence meets the configured threshold.
+        # Triage result is always saved to DB regardless of confidence.
+        if _meets_confidence_threshold(triage_output.confidence, settings.min_confidence):
+            try:
+                comment_body = format_triage_comment(triage_output, issue.github_number)
+                comment_url = await post_issue_comment(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    issue_number=issue.github_number,
+                    body=comment_body,
+                    installation_id=repo.installation_id,
+                )
+                from sqlalchemy import update
+                await session.execute(
+                    update(TriageResult)
+                    .where(TriageResult.issue_id == issue_id)
+                    .values(comment_url=comment_url)
+                )
+                await session.commit()
+                result["comment_url"] = comment_url
+            except Exception as exc:
+                logger.warning(
+                    "Failed to post triage comment for issue #%d: %s",
+                    issue.github_number, exc,
+                )
+        else:
+            logger.info(
+                "Skipping comment for issue #%d: confidence=%s below min=%s",
+                issue.github_number, triage_output.confidence, settings.min_confidence,
             )
 
         return result
