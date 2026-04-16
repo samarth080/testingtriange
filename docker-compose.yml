@@ -71,6 +71,19 @@ services:
       - ./backend:/app
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
 volumes:
   postgres_data:
   qdrant_data:
