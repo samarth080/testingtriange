@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # ── Semantic cache ────────────────────────────────────────────────────────
     semantic_cache_ttl: int = 3600  # seconds
 
+    # ── CORS ─────────────────────────────────────────────────────────────────
+    # Comma-separated list of allowed origins. Use "*" to allow all (dev default).
+    # Example: "http://localhost:3000,https://your-app.vercel.app"
+    cors_origins: str = "*"
+
     @property
     def embedding_provider(self) -> str:
         """Return which embedding provider to use based on available API keys."""
