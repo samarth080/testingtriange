@@ -2,6 +2,8 @@
 import os
 import sys
 
+import pytest
+
 # Add eval/ to path so we can import metrics without installing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../eval"))
 
@@ -55,6 +57,26 @@ def test_label_metrics_both_empty():
     assert result["precision"] == 0.0
     assert result["recall"] == 0.0
     assert result["f1"] == 0.0
+
+
+def test_label_metrics_case_insensitive():
+    """Predicted 'Bug' should match actual 'bug'."""
+    m = label_metrics(["Bug", "Feature"], ["bug", "feature"])
+    assert m["f1"] == 1.0
+
+
+def test_label_metrics_strips_whitespace():
+    """Labels with surrounding spaces should match."""
+    m = label_metrics([" bug "], ["bug"])
+    assert m["f1"] == 1.0
+
+
+def test_label_metrics_mixed_case_partial():
+    """Case normalization on partial overlap: 1/2 predicted correct."""
+    m = label_metrics(["BUG", "Enhancement"], ["bug", "feature"])
+    # TP=1 (bug), pred_set=2, actual_set=2
+    assert m["precision"] == pytest.approx(0.5)
+    assert m["recall"] == pytest.approx(0.5)
 
 
 # ---------------------------------------------------------------------------

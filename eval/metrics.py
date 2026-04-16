@@ -9,9 +9,17 @@ from __future__ import annotations
 import statistics
 
 
+def normalize_label(s: str) -> str:
+    """Normalize a label string for comparison: lowercase and strip whitespace."""
+    return s.lower().strip()
+
+
 def label_metrics(predicted: list[str], actual: list[str]) -> dict[str, float]:
     """
     Compute precision, recall, and F1 for one issue's label prediction.
+
+    Labels are normalized (lowercase + strip) before comparison so that
+    'Bug' and 'bug' are treated as the same label.
 
     Args:
         predicted: Labels suggested by the triage pipeline.
@@ -23,8 +31,8 @@ def label_metrics(predicted: list[str], actual: list[str]) -> dict[str, float]:
     if not actual:
         return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
 
-    pred_set = set(predicted)
-    actual_set = set(actual)
+    pred_set = {normalize_label(s) for s in predicted}
+    actual_set = {normalize_label(s) for s in actual}
     tp = len(pred_set & actual_set)
 
     precision = tp / len(pred_set) if pred_set else 0.0
