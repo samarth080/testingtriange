@@ -11,7 +11,7 @@ import logging
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import make_worker_session
 from app.github.comments import post_issue_comment
 from app.indexing.embedder import embedder_from_settings
 from app.indexing.qdrant_store import QdrantStore
@@ -32,7 +32,7 @@ def _meets_confidence_threshold(output_confidence: str, min_confidence: str) -> 
 
 
 async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
-    async with AsyncSessionLocal() as session:
+    async with make_worker_session()() as session:
         repo = await session.get(Repo, repo_id)
         if not repo:
             # Not retrying: if the repo doesn't exist at task run time, retrying won't help.

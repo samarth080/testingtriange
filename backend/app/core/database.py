@@ -14,6 +14,7 @@ Usage in Celery tasks (sync context):
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
@@ -27,6 +28,19 @@ AsyncSessionLocal = async_sessionmaker(
     engine,
     expire_on_commit=False,  # Don't expire objects after commit — we read them after
 )
+
+
+def make_worker_session() -> async_sessionmaker:
+    """
+    Create a fresh session factory with NullPool for use in Celery tasks.
+
+    Celery forks worker processes — connection pools created in the parent
+    process have asyncio futures attached to the parent's event loop, which
+    causes 'Future attached to a different loop' errors in child processes.
+    NullPool avoids this by never reusing connections across asyncio.run() calls.
+    """
+    worker_engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    return async_sessionmaker(worker_engine, expire_on_commit=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
