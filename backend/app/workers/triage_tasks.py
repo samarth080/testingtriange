@@ -12,9 +12,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.github.comments import post_issue_comment
 from app.indexing.embedder import embedder_from_settings
 from app.indexing.qdrant_store import QdrantStore
 from app.models.orm import Issue, Repo, TriageResult
+from app.triage.formatter import format_triage_comment
 from app.triage.pipeline import run_triage_pipeline
 from app.workers.celery_app import celery_app
 
@@ -67,13 +69,39 @@ async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
         await session.execute(stmt)
         await session.commit()
 
-        return {
+        result = {
             "issue_id": issue_id,
             "github_number": issue.github_number,
             "confidence": triage_output.confidence,
             "labels": triage_output.labels,
             "latency_ms": latency_ms,
         }
+
+        # Post comment to GitHub — non-fatal: triage data is already saved
+        try:
+            comment_body = format_triage_comment(triage_output, issue.github_number)
+            comment_url = await post_issue_comment(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=issue.github_number,
+                body=comment_body,
+                installation_id=repo.installation_id,
+            )
+            from sqlalchemy import update
+            await session.execute(
+                update(TriageResult)
+                .where(TriageResult.issue_id == issue_id)
+                .values(comment_url=comment_url)
+            )
+            await session.commit()
+            result["comment_url"] = comment_url
+        except Exception as exc:
+            logger.warning(
+                "Failed to post triage comment for issue #%d: %s",
+                issue.github_number, exc,
+            )
+
+        return result
 
 
 @celery_app.task(name="triage.triage_issue", bind=True, max_retries=3)
