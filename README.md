@@ -1,6 +1,6 @@
 # TriageCopilot
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
 > Graph-aware RAG GitHub issue triage assistant. Automatically triages new GitHub issues with duplicate detection, label suggestions, relevant file identification, and assignee suggestions — all with cited reasoning posted as a comment directly on the issue.
 
