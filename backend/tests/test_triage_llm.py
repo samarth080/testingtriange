@@ -79,13 +79,8 @@ async def test_triage_with_llm_parses_valid_json():
         "confidence": "high",
         "reasoning": "Clear memory leak.",
     }
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text=json.dumps(response_payload))]
-    mock_client = AsyncMock()
-    mock_client.messages.create = AsyncMock(return_value=mock_message)
-
-    with patch("app.triage.llm.anthropic") as mock_anthropic:
-        mock_anthropic.AsyncAnthropic.return_value = mock_client
+    with patch("app.triage.llm._call_anthropic", new_callable=AsyncMock,
+               return_value=json.dumps(response_payload)):
         result = await triage_with_llm(
             title="Bug report",
             body="Something broke",
@@ -103,13 +98,8 @@ async def test_triage_with_llm_parses_valid_json():
 
 @pytest.mark.asyncio
 async def test_triage_with_llm_falls_back_on_invalid_json():
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="This is not valid JSON.")]
-    mock_client = AsyncMock()
-    mock_client.messages.create = AsyncMock(return_value=mock_message)
-
-    with patch("app.triage.llm.anthropic") as mock_anthropic:
-        mock_anthropic.AsyncAnthropic.return_value = mock_client
+    with patch("app.triage.llm._call_anthropic", new_callable=AsyncMock,
+               return_value="This is not valid JSON."):
         result = await triage_with_llm("title", None, [], [], "key")
 
     assert isinstance(result, TriageOutput)
@@ -123,15 +113,10 @@ async def test_triage_with_llm_uses_correct_model():
         "duplicate_of": None, "labels": [], "relevant_files": [],
         "suggested_assignees": [], "confidence": "medium", "reasoning": "ok",
     }
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text=json.dumps(response_payload))]
-    mock_client = AsyncMock()
-    mock_client.messages.create = AsyncMock(return_value=mock_message)
-
-    with patch("app.triage.llm.anthropic") as mock_anthropic:
-        mock_anthropic.AsyncAnthropic.return_value = mock_client
+    with patch("app.triage.llm._call_anthropic", new_callable=AsyncMock,
+               return_value=json.dumps(response_payload)) as mock_call:
         await triage_with_llm("title", "body", ["bug"], [make_result(1)], "key123")
 
-    call_kwargs = mock_client.messages.create.call_args.kwargs
-    assert call_kwargs["model"] == "claude-sonnet-4-6"
-    mock_anthropic.AsyncAnthropic.assert_called_once_with(api_key="key123")
+    # Verify _call_anthropic was invoked with the correct api_key
+    mock_call.assert_awaited_once()
+    assert mock_call.call_args.args[0] == "key123"

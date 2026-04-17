@@ -6,12 +6,14 @@ from app.indexing.qdrant_store import QdrantStore
 from app.retrieval.dense import dense_search
 
 
-def _make_qdrant_store(search_return_value):
-    """Build a QdrantStore with a mocked _client.search."""
+def _make_qdrant_store(hits):
+    """Build a QdrantStore with a mocked _client.query_points."""
     store = object.__new__(QdrantStore)
     store._dim = 1024
     store._client = MagicMock()
-    store._client.search = AsyncMock(return_value=search_return_value)
+    response = MagicMock()
+    response.points = hits
+    store._client.query_points = AsyncMock(return_value=response)
     return store
 
 
@@ -46,7 +48,7 @@ async def test_dense_search_passes_repo_filter_to_qdrant():
     store = _make_qdrant_store([])
     await dense_search(store, "code_chunks", [0.0] * 1024, repo_id=42, k=5)
 
-    call_kwargs = store._client.search.call_args.kwargs
+    call_kwargs = store._client.query_points.call_args.kwargs
     filter_conditions = call_kwargs["query_filter"].must
     repo_condition = next(
         (c for c in filter_conditions if getattr(c, "key", None) == "repo_id"), None

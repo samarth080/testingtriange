@@ -39,7 +39,7 @@ def make_mock_issue():
 
 def make_mock_session_cm(get_side_effect):
     """
-    Return a context manager whose __aenter__ yields a session mock.
+    Return (context_manager, session_mock) where context_manager wraps session_mock.
     `get_side_effect` is passed as the `side_effect` of session.get.
     """
     mock_session = AsyncMock()
@@ -54,12 +54,22 @@ def make_mock_session_cm(get_side_effect):
     return mock_cm, mock_session
 
 
+def make_worker_session_patch(mock_cm):
+    """
+    Return a mock for make_worker_session so that make_worker_session()() returns mock_cm.
+    The code does: async with make_worker_session()() as session
+    """
+    mock_factory = MagicMock(return_value=mock_cm)
+    return MagicMock(return_value=mock_factory)
+
+
 @pytest.mark.asyncio
 async def test_repo_not_found_returns_error():
     """When session.get(Repo, repo_id) returns None, return repo_not_found error."""
     mock_cm, _ = make_mock_session_cm(get_side_effect=[None])
+    mock_make_session = make_worker_session_patch(mock_cm)
 
-    with patch("app.workers.triage_tasks.AsyncSessionLocal", return_value=mock_cm):
+    with patch("app.workers.triage_tasks.make_worker_session", mock_make_session):
         result = await _async_triage_issue(repo_id=99, issue_id=10)
 
     assert result == {"error": "repo_not_found"}
@@ -70,8 +80,9 @@ async def test_issue_not_found_returns_error():
     """When repo exists but issue.get returns None, return issue_not_found error."""
     mock_repo = make_mock_repo()
     mock_cm, _ = make_mock_session_cm(get_side_effect=[mock_repo, None])
+    mock_make_session = make_worker_session_patch(mock_cm)
 
-    with patch("app.workers.triage_tasks.AsyncSessionLocal", return_value=mock_cm):
+    with patch("app.workers.triage_tasks.make_worker_session", mock_make_session):
         result = await _async_triage_issue(repo_id=1, issue_id=999)
 
     assert result == {"error": "issue_not_found"}
@@ -89,16 +100,16 @@ async def test_happy_path_returns_expected_keys():
     mock_cm, mock_session = make_mock_session_cm(
         get_side_effect=[mock_repo, mock_issue]
     )
+    mock_make_session = make_worker_session_patch(mock_cm)
+    mock_cache = AsyncMock()
 
     with (
-        patch("app.workers.triage_tasks.AsyncSessionLocal", return_value=mock_cm),
-        patch(
-            "app.workers.triage_tasks.run_triage_pipeline",
-            new_callable=AsyncMock,
-            return_value=(VALID_OUTPUT, 123),
-        ),
+        patch("app.workers.triage_tasks.make_worker_session", mock_make_session),
+        patch("app.workers.triage_tasks.run_triage_pipeline",
+              new_callable=AsyncMock, return_value=(VALID_OUTPUT, 123)),
         patch("app.workers.triage_tasks.embedder_from_settings"),
         patch("app.workers.triage_tasks.QdrantStore"),
+        patch("app.workers.triage_tasks.SemanticCache", return_value=mock_cache),
     ):
         result = await _async_triage_issue(repo_id=1, issue_id=10)
 
@@ -107,7 +118,6 @@ async def test_happy_path_returns_expected_keys():
     assert result["issue_id"] == 10
     assert result["labels"] == ["bug", "performance"]
     assert isinstance(result["latency_ms"], int)
-    # execute called once for the upsert (comment posting is mocked below in other tests)
     assert mock_session.execute.await_count >= 1
     assert mock_session.commit.await_count >= 1
 
@@ -136,13 +146,18 @@ async def test_async_triage_issue_posts_comment_on_success():
     mock_session.get = AsyncMock(side_effect=[mock_repo, mock_issue])
     mock_session.execute = AsyncMock()
     mock_session.commit = AsyncMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("app.workers.triage_tasks.AsyncSessionLocal", return_value=mock_session), \
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_cm.__aexit__ = AsyncMock(return_value=False)
+    mock_make_session = make_worker_session_patch(mock_cm)
+    mock_cache = AsyncMock()
+
+    with patch("app.workers.triage_tasks.make_worker_session", mock_make_session), \
          patch("app.workers.triage_tasks.run_triage_pipeline", AsyncMock(return_value=(mock_output, 100))), \
          patch("app.workers.triage_tasks.embedder_from_settings", MagicMock()), \
          patch("app.workers.triage_tasks.QdrantStore", MagicMock()), \
+         patch("app.workers.triage_tasks.SemanticCache", return_value=mock_cache), \
          patch("app.workers.triage_tasks.post_issue_comment", AsyncMock(return_value="https://github.com/myorg/myrepo/issues/42#issuecomment-1")) as mock_comment:
         result = await _async_triage_issue(repo_id=1, issue_id=1)
 
@@ -177,13 +192,18 @@ async def test_async_triage_issue_continues_if_comment_fails():
     mock_session.get = AsyncMock(side_effect=[mock_repo, mock_issue])
     mock_session.execute = AsyncMock()
     mock_session.commit = AsyncMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("app.workers.triage_tasks.AsyncSessionLocal", return_value=mock_session), \
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_cm.__aexit__ = AsyncMock(return_value=False)
+    mock_make_session = make_worker_session_patch(mock_cm)
+    mock_cache = AsyncMock()
+
+    with patch("app.workers.triage_tasks.make_worker_session", mock_make_session), \
          patch("app.workers.triage_tasks.run_triage_pipeline", AsyncMock(return_value=(mock_output, 50))), \
          patch("app.workers.triage_tasks.embedder_from_settings", MagicMock()), \
          patch("app.workers.triage_tasks.QdrantStore", MagicMock()), \
+         patch("app.workers.triage_tasks.SemanticCache", return_value=mock_cache), \
          patch("app.workers.triage_tasks.post_issue_comment", AsyncMock(side_effect=httpx.HTTPStatusError("403", request=MagicMock(), response=MagicMock()))):
         result = await _async_triage_issue(repo_id=1, issue_id=1)
 
