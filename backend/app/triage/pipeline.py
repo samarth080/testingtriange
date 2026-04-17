@@ -76,6 +76,8 @@ async def run_triage_pipeline(
         labels=issue.labels or [],
         context_results=reranked,
         api_key=cfg.anthropic_api_key,
+        gemini_api_key=cfg.gemini_api_key,
+        groq_api_key=cfg.groq_api_key,
     )
 
     if cache is not None:

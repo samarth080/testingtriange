@@ -26,14 +26,14 @@ services:
       retries: 10
 
   qdrant:
-    image: qdrant/qdrant:v1.9.2
+    image: qdrant/qdrant:v1.13.6
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/6333' && exit 0 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -54,7 +54,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-      - ./certs:/certs:ro
+      - ./certs:/app/certs:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:
@@ -69,6 +69,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./certs:/app/certs:ro
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
 
   frontend:

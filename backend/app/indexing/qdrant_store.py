@@ -12,6 +12,7 @@ import logging
 import uuid
 
 from qdrant_client import AsyncQdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -75,15 +76,24 @@ class QdrantStore:
         """
         if k < 1:
             raise ValueError(f"k must be >= 1, got {k}")
-        response = await self._client.query_points(
-            collection_name=collection,
-            query=query_vector,
-            query_filter=Filter(
-                must=[FieldCondition(key="repo_id", match=MatchValue(value=repo_id))]
-            ),
-            limit=k,
-            with_payload=True,
-        )
+        try:
+            response = await self._client.query_points(
+                collection_name=collection,
+                query=query_vector,
+                query_filter=Filter(
+                    must=[FieldCondition(key="repo_id", match=MatchValue(value=repo_id))]
+                ),
+                limit=k,
+                with_payload=True,
+            )
+        except UnexpectedResponse as exc:
+            if exc.status_code == 404:
+                logger.warning(
+                    "Collection %r not found — returning empty results (repo not indexed yet)",
+                    collection,
+                )
+                return []
+            raise
         return [
             {"id": str(r.id), "score": r.score, "payload": r.payload or {}}
             for r in response.points

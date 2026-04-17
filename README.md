@@ -1,6 +1,18 @@
 # TriageCopilot
 
-> Graph-aware RAG GitHub issue triage assistant. Automatically triages new issues with duplicate detection, label suggestions, relevant file identification, and assignee suggestions — all with cited reasoning.
+> Graph-aware RAG GitHub issue triage assistant. Automatically triages new GitHub issues with duplicate detection, label suggestions, relevant file identification, and assignee suggestions — all with cited reasoning posted as a comment directly on the issue.
+
+## What It Does
+
+When a new issue is opened on a repo where TriageCopilot is installed:
+
+1. GitHub sends a webhook to the FastAPI backend
+2. A Celery worker picks it up and embeds the issue title + body using Voyage AI
+3. Hybrid search (BM25 + dense vector) retrieves similar past issues and relevant code files from Qdrant
+4. 1-hop graph expansion enriches the context (linked PRs, touched files)
+5. A reranker (Cohere or HuggingFace fallback) scores and filters results
+6. An LLM (Groq/Llama 3.3, Anthropic Claude, or Gemini) generates structured triage output
+7. A comment is posted back to the GitHub issue with confidence, labels, reasoning, and related issues
 
 ## Architecture
 
@@ -11,13 +23,13 @@ graph TD
     CW -->|backfill / index| PG[(Postgres)]
     CW -->|embed + upsert| QD[(Qdrant)]
     CW -->|triage pipeline| RP[Retrieval Pipeline]
-    RP -->|hybrid search| QD
-    RP -->|graph expand| PG
-    RP -->|rerank| CR[Cohere Reranker]
-    RP --> LLM[Claude Sonnet]
+    RP -->|hybrid search BM25 + dense| QD
+    RP -->|graph expand 1-hop| PG
+    RP -->|rerank| CR[Cohere / HuggingFace Reranker]
+    RP --> LLM[LLM: Groq / Claude / Gemini]
     LLM -->|structured JSON| AC[Action Layer]
     AC -->|post comment| GH2[GitHub Issue Comment]
-    AC -->|store result| PG
+    AC -->|store result + comment_url| PG
     FE[Next.js Dashboard] -->|triage history + explainability| PG
 ```
 
@@ -26,21 +38,89 @@ graph TD
 | Layer | Technology |
 |---|---|
 | Backend | FastAPI + Celery + Redis |
-| Database | Postgres 15 + SQLAlchemy 2.0 + Alembic |
-| Vector DB | Qdrant (self-hosted) |
-| Embeddings | voyage-code-3 / text-embedding-3-large (fallback: bge-large-en) |
-| Reranker | Cohere Rerank v3 (fallback: bge-reranker-large) |
-| LLM | Claude Sonnet (Anthropic API) |
-| Code Parsing | tree-sitter (Python, JS, TS, Go) |
-| Frontend | Next.js 14 + Tailwind + shadcn/ui |
+| Database | Postgres 15 + SQLAlchemy 2.0 (async) + Alembic |
+| Vector DB | Qdrant v1.13 (self-hosted) |
+| Embeddings | Voyage AI `voyage-code-3` (fallback: OpenAI `text-embedding-3-large`, then `bge-large-en`) |
+| Reranker | Cohere Rerank v3 (fallback: `bge-reranker-large`) |
+| LLM | Groq `llama-3.3-70b-versatile` / Anthropic Claude Sonnet / Google Gemini |
+| Code Parsing | tree-sitter (Python, JS, TS, Go, Rust, Java) |
+| Retrieval | Hybrid BM25 + dense + RRF fusion + 1-hop graph expansion |
+| Semantic Cache | Redis-backed cache keyed on embedding similarity |
+| Frontend | Next.js 14 (App Router) + Tailwind CSS + shadcn/ui |
+| Containerization | Docker Compose (6 services: postgres, redis, qdrant, backend, worker, frontend) |
+
+## What Was Built (Day by Day)
+
+### Day 1 — Foundation
+- FastAPI app scaffold with health endpoint
+- Docker Compose stack: Postgres, Redis, Qdrant, backend, Celery worker
+- HMAC-SHA256 webhook signature verification (timing-safe)
+- SQLAlchemy ORM models: `Repo`, `Issue`, `PullRequest`, `Commit`, `File`, `GraphEdge`, `Chunk`, `TriageResult`
+- Alembic migrations with all indexes and constraints
+
+### Day 2 — Backfill Pipeline
+- Async GitHub API client with Link-header pagination and rate-limit retry (403/429 + `Retry-After`)
+- Fetchers for issues, PRs, commits, and full file trees — all upserted idempotently
+- Graph edges: `issue_pr` (PR body regex for `closes/fixes/resolves #N`) and `pr_file`
+- Celery task `ingestion.backfill_repo` with 3× retry on transient failure
+
+### Day 3 — Chunking + Indexing
+- Tree-sitter chunkers for Python, JS/TS, Go — extracts functions and classes as individual chunks
+- Markdown chunker (header-aware), discussion chunker for issues and PRs
+- Voyage AI embedding with OpenAI fallback and local `bge-large-en` last resort
+- Celery task `indexing.index_repo` — embeds all chunks and upserts into Qdrant with stable deterministic UUIDs
+
+### Day 4 — Hybrid Retrieval
+- BM25 sparse search over Postgres full-text (`tsvector` + `ts_rank`)
+- Dense vector search via Qdrant `query_points` filtered by `repo_id`
+- Reciprocal Rank Fusion (RRF) to merge both ranked lists
+- Chunk deduplication for graph-expanded context
+- `GET /search` endpoint for manual retrieval testing
+
+### Day 5 — Graph Expansion + Reranker + Triage Endpoint
+- 1-hop graph expansion: given retrieved chunks, fetches linked PRs and files from `graph_edges`
+- Cohere Rerank v3 reranker with `bge-reranker-large` HuggingFace fallback
+- LLM triage call returning structured JSON: `confidence`, `labels`, `reasoning`, `related_issues`, `suggested_files`, `suggested_assignees`
+- `POST /triage` REST endpoint wired to full pipeline
+
+### Day 6 — Webhook → Comment Flow
+- `issues` webhook handler: upserts issue to Postgres then enqueues `triage.triage_issue`
+- `push` webhook handler: triggers incremental re-index on new commits
+- GitHub App comment posting with JWT authentication and installation access token
+- Celery task `triage.triage_issue` saves result to `triage_results` and posts comment on GitHub
+
+### Day 7 — Eval Harness
+- Eval dataset of labeled historical issues
+- Precision/recall/F1 metrics on label prediction and duplicate detection
+- Baseline metrics report
+
+### Day 8 — Calibration + Incremental Indexing + Semantic Cache
+- Confidence calibration: `min_confidence` setting gates whether a comment is posted
+- Incremental indexing task triggered on `push` events (avoids full re-backfill)
+- Redis semantic cache: embedding-similarity key lookup with configurable TTL — skips LLM call on cache hit
+
+### Day 9 — Next.js Dashboard
+- App Router with repo list, per-repo issue view, triage result detail
+- Server components fetching from FastAPI backend
+- Shows confidence, labels, reasoning, related issues, suggested files per triage result
+
+### Day 10 — Final Polish + Full-Stack Docker
+- `pytest` marker system: integration tests skip by default, run with `pytest -m integration`
+- FastAPI `CORSMiddleware` with wildcard-aware credential handling
+- Next.js `output: 'standalone'` for lean Docker image with non-root user
+- `docker-compose.yml` frontend service + Qdrant TCP healthcheck
+- `scripts/smoke_test.sh` — 8-check curl smoke test covering all major endpoints
+- Multi-provider LLM support: Groq (free, default) → Anthropic Claude → Google Gemini
+- `NullPool` for Celery worker DB sessions to avoid asyncio event loop conflicts across forks
 
 ## Local Setup
 
 ### Prerequisites
 
 - Docker + Docker Compose
-- Python 3.11+
-- A GitHub App (see registration instructions below)
+- A GitHub App (instructions below)
+- One of: Groq API key (free), Anthropic API key, or Google Gemini API key
+- Voyage AI API key (free tier: 200M tokens)
 
 ### 1. Clone and configure
 
@@ -48,179 +128,128 @@ graph TD
 git clone https://github.com/YOUR_USERNAME/triage-copilot
 cd triage-copilot
 cp .env.example .env
-# Edit .env and fill in GITHUB_APP_ID, GITHUB_WEBHOOK_SECRET, ANTHROPIC_API_KEY
+```
+
+Edit `.env`:
+
+```env
+# GitHub App
+GITHUB_APP_ID=your_app_id
+GITHUB_WEBHOOK_SECRET=your_webhook_secret
+GITHUB_PRIVATE_KEY_PATH=./certs/github-app.pem
+
+# Database (default works with docker compose)
+DATABASE_URL=postgresql+asyncpg://triage:triage@postgres:5432/triage
+REDIS_URL=redis://redis:6379/0
+QDRANT_URL=http://qdrant:6333
+
+# Embeddings (pick one)
+VOYAGE_API_KEY=your_voyage_key
+
+# LLM (pick one — Groq is free)
+GROQ_API_KEY=your_groq_key        # free at console.groq.com
+# ANTHROPIC_API_KEY=your_key      # paid
+# GEMINI_API_KEY=your_key         # free tier limited
+
+# Optional
+MIN_CONFIDENCE=low                 # low|medium|high — gates comment posting
+CORS_ORIGINS=http://localhost:3000
 ```
 
 ### 2. Register the GitHub App
 
-1. Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**
-2. Set the following:
-   - **GitHub App name:** `TriageCopilot-dev` (must be unique)
+1. Go to **github.com/settings/apps → New GitHub App**
+2. Set:
    - **Homepage URL:** `http://localhost:8000`
-   - **Webhook URL:** Use your smee.io proxy URL (see step 4)
-   - **Webhook secret:** Generate a random secret (`openssl rand -hex 32`) and set it in `.env` as `GITHUB_WEBHOOK_SECRET`
-   - **Permissions → Repository permissions:**
-     - Issues: Read & Write
-     - Pull requests: Read
-     - Contents: Read
-     - Metadata: Read
-   - **Subscribe to events:** Issues, Pull request, Push, Installation
-3. Click **Create GitHub App**
-4. Note your **App ID** → set as `GITHUB_APP_ID` in `.env`
-5. Scroll to **Private keys** → **Generate a private key** → download the `.pem` file
-6. Copy it: `mkdir -p certs && cp ~/Downloads/*.pem certs/github-app.pem`
-7. Set `GITHUB_PRIVATE_KEY_PATH=./certs/github-app.pem` in `.env`
+   - **Webhook URL:** your smee.io URL (see step 3)
+   - **Webhook secret:** `openssl rand -hex 32`
+   - **Permissions:** Issues (RW), Pull requests (R), Contents (R), Metadata (R)
+   - **Events:** Issues, Pull request, Push, Installation
+3. Click **Create GitHub App**, note the **App ID**
+4. Scroll to **Private keys → Generate a private key** → download `.pem`
+5. `mkdir -p certs && cp ~/Downloads/*.pem certs/github-app.pem`
 
-### 3. Set up smee.io proxy (for local webhook delivery)
+### 3. Set up webhook proxy (local dev)
 
 ```bash
 npm install --global smee-client
-# Create a new channel at https://smee.io → copy the URL
-smee --url https://smee.io/YOUR_CHANNEL_ID --target http://localhost:8000/webhooks/github
+# Create channel at https://smee.io, copy URL
+smee --url https://smee.io/YOUR_CHANNEL --target http://localhost:8000/webhooks/github
 ```
 
-Set the smee.io URL as the **Webhook URL** in your GitHub App settings.
-
-### 4. Start services
-
-```bash
-docker compose up -d postgres redis qdrant
-```
-
-### 5. Run database migrations
-
-```bash
-cd backend
-pip install -e ".[dev]"
-alembic upgrade head
-```
-
-### 6. Start the backend
-
-```bash
-cd backend
-uvicorn app.main:app --reload
-```
-
-Or run everything via Docker:
+### 4. Start everything
 
 ```bash
 docker compose up
 ```
 
-### 7. Install the GitHub App on a test repo
-
-Go to your GitHub App → **Install App** → choose a repository. You should see an `installation` webhook arrive in your smee.io channel and a `202` response from the backend.
-
-## Day 2: Backfill Pipeline
-
-When a GitHub App installation event arrives, the webhook handler enqueues a Celery task that fetches the full history of the installed repo and stores it in Postgres.
-
-### What gets fetched
-
-| Entity | Source endpoint | Notes |
-|---|---|---|
-| Issues | `GET /repos/{owner}/{repo}/issues` | Last 2 years; skips PRs that appear in the same endpoint |
-| Pull Requests | `GET /repos/{owner}/{repo}/pulls` | All time; extracts `closes/fixes/resolves #N` links from PR body |
-| Commits | `GET /repos/{owner}/{repo}/commits` | Last 2 years; uses GitHub login over git author name |
-| Files | `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1` | Full tree; detects language from extension |
-
-### Graph edges created
-
-| Edge type | From → To | How |
-|---|---|---|
-| `issue_pr` | Issue → PullRequest | PR body regex: `closes/fixes/resolves #N` |
-| `pr_file` | PullRequest → File | `/pulls/{n}/files` endpoint |
-
-### Key components
-
-- [backend/app/ingestion/github_client.py](backend/app/ingestion/github_client.py) — Async GitHub API client with Link-header pagination and rate-limit retry (403/429 + `Retry-After`)
-- [backend/app/ingestion/fetchers.py](backend/app/ingestion/fetchers.py) — One function per entity type; all use `INSERT ... ON CONFLICT DO UPDATE`
-- [backend/app/workers/ingestion_tasks.py](backend/app/workers/ingestion_tasks.py) — Celery task `ingestion.backfill_repo`; retries up to 3× on failure
-- [backend/app/core/database.py](backend/app/core/database.py) — Async SQLAlchemy engine, session factory, FastAPI `get_db` dependency
-
-### Running the backfill manually
+This starts all 6 services. Run migrations on first boot:
 
 ```bash
-# From the backend virtualenv, with Redis + Postgres running
-celery -A app.workers.celery_app worker --loglevel=info &
-
-python - <<'EOF'
-from app.workers.ingestion_tasks import backfill_repo
-backfill_repo.delay(<repo_id>)   # repo_id from the repos table
-EOF
+docker compose exec backend sh -c "PYTHONPATH=/app alembic upgrade head"
 ```
+
+### 5. Install the GitHub App on a repo
+
+Go to your GitHub App → **Install App** → pick a repo. This triggers an `installation` webhook which auto-enqueues backfill + indexing.
+
+### 6. Test it
+
+Create a new issue on the installed repo. Within ~10 seconds, TriageCopilot posts a triage comment.
 
 ## Running Tests
 
 ```bash
 cd backend
-pytest tests/ -v
+pytest tests/ -v                    # unit tests only (fast)
+pytest tests/ -m integration -v     # requires live Postgres + Qdrant
+```
+
+## Smoke Test
+
+```bash
+./scripts/smoke_test.sh             # requires docker compose up
+```
+
+## Manual Backfill
+
+```bash
+docker compose exec worker python -c "
+from app.workers.ingestion_tasks import backfill_repo
+backfill_repo.delay(1)  # repo_id from the repos table
+"
 ```
 
 ## Running the Full Stack
 
-```bash
-# Start all services (Postgres, Redis, Qdrant, backend, worker, frontend)
-docker compose up
-
-# Backend API:   http://localhost:8000
-# Frontend:      http://localhost:3000
-# API docs:      http://localhost:8000/docs
 ```
-
-### Frontend dev mode (faster iteration)
-
-```bash
-# Terminal 1: infrastructure
-docker compose up postgres redis qdrant
-
-# Terminal 2: backend
-cd backend && uvicorn app.main:app --reload
-
-# Terminal 3: frontend
-cd frontend && cp .env.local.example .env.local && npm run dev
-```
-
-### Smoke test
-
-```bash
-# With backend running on port 8000:
-./scripts/smoke_test.sh
-```
-
-### Integration tests (require live Postgres + Qdrant)
-
-```bash
-cd backend
-pytest tests/ -m integration -v
-```
-
-## Evaluation
-
-```bash
-# Day 7+: run the eval harness against labeled historical issues
-cd eval
-python run_eval.py --repo owner/repo --output results.md
+Backend API:   http://localhost:8000
+Frontend:      http://localhost:3000
+API docs:      http://localhost:8000/docs
+Qdrant UI:     http://localhost:6333/dashboard
 ```
 
 ## Deployment
 
-- **Backend:** Railway (`railway up` from `/backend`)
-- **Qdrant:** Hetzner VPS (`docker compose -f docker-compose.prod.yml up -d qdrant`)
-- **Frontend:** Vercel (`vercel deploy` from `/frontend`)
+| Service | Platform |
+|---|---|
+| Backend + Worker | Railway / Render / Fly.io |
+| Qdrant | Hetzner VPS or Qdrant Cloud |
+| Frontend | Vercel |
+| Redis | Upstash |
+| Postgres | Supabase / Railway |
 
 ## Progress
 
-| Day | Status | Deliverable |
-|---|---|---|
-| 1 | ✅ | Scaffold, Docker Compose, webhook verification, schema, migrations |
-| 2 | ✅ | Backfill pipeline (issues, PRs, commits, files) |
-| 3 | ✅ | Chunkers (tree-sitter, markdown, discussion) + embeddings |
-| 4 | ✅ | Hybrid retrieval (BM25 + dense + RRF) |
-| 5 | ✅ | Graph expansion + reranker + LLM triage endpoint |
-| 6 | ✅ | End-to-end webhook → comment flow |
-| 7 | ✅ | Eval harness + baseline metrics |
-| 8 | ✅ | Calibration + incremental indexing + semantic cache |
-| 9 | ✅ | Next.js dashboard |
-| 10 | ✅ | Final polish: clean test suite, CORS, Docker full-stack, smoke tests |
+| Day | Deliverable |
+|---|---|
+| 1 | Scaffold, Docker Compose, webhook verification, ORM schema, Alembic migrations |
+| 2 | Backfill pipeline: issues, PRs, commits, files, graph edges |
+| 3 | Tree-sitter chunkers, Voyage AI embeddings, `index_repo` Celery task |
+| 4 | Hybrid retrieval: BM25 + dense + RRF, `/search` endpoint |
+| 5 | 1-hop graph expansion, Cohere reranker, LLM triage, `/triage` endpoint |
+| 6 | Webhook → Celery → GitHub comment end-to-end, `push` incremental index |
+| 7 | Eval harness, precision/recall metrics, baseline report |
+| 8 | Confidence calibration, incremental indexing, Redis semantic cache |
+| 9 | Next.js 14 App Router dashboard: repo list, issue view, triage detail |
+| 10 | Test suite cleanup, CORS, full Docker stack, smoke tests, multi-LLM support |
