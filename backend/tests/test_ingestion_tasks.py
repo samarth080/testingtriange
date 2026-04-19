@@ -37,8 +37,9 @@ async def test_async_backfill_repo_returns_summary():
     mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session_cm.__aexit__ = AsyncMock(return_value=False)
 
+    mock_worker_session = MagicMock(return_value=mock_session_cm)
     with (
-        patch("app.workers.ingestion_tasks.AsyncSessionLocal", return_value=mock_session_cm),
+        patch("app.workers.ingestion_tasks.make_worker_session", return_value=mock_worker_session),
         patch("app.workers.ingestion_tasks.get_installation_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.workers.ingestion_tasks.GitHubClient"),
         patch("app.workers.ingestion_tasks._get_default_branch", new_callable=AsyncMock, return_value="main"),

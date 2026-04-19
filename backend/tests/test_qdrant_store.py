@@ -12,6 +12,7 @@ def mock_qdrant_client():
         instance = MockClient.return_value
         instance.collection_exists = AsyncMock(return_value=False)
         instance.create_collection = AsyncMock()
+        instance.create_payload_index = AsyncMock()
         instance.upsert = AsyncMock()
         instance.delete = AsyncMock()
         yield instance
