@@ -291,17 +291,41 @@ curl -X POST https://your-service.onrender.com/admin/backfill/1
 
 The backfill task automatically chains into `index_repo` on completion.
 
+## Eval Results
+
+Evaluated on 10 labeled historical issues from `samarth080/testingtriange`:
+
+| Metric | Value |
+|---|---|
+| Label Precision | **0.950** |
+| Label Recall | **1.000** |
+| Label F1 | **0.967** |
+| Avg latency | 3.88s |
+| p95 latency | 4.24s |
+
+9/10 issues predicted perfectly. Only miss: one issue where the model over-predicted (`bug, performance` vs actual `bug`). Full report: [`eval/results.md`](eval/results.md).
+
+## Final Stats
+
+| Stat | Value |
+|---|---|
+| Tests | 150 passing, 0 failing |
+| Commits | 102 |
+| Days | 10 / 10 ✅ |
+| Live backend | [triagecopilot-backend.onrender.com](https://triagecopilot-backend.onrender.com) |
+| Live frontend | Vercel |
+
 ## Progress
 
 | Day | Deliverable |
 |---|---|
-| 1 | Scaffold, Docker Compose, webhook verification, ORM schema, Alembic migrations |
-| 2 | Backfill pipeline: issues, PRs, commits, files, graph edges |
-| 3 | Tree-sitter chunkers, Voyage AI embeddings, `index_repo` Celery task |
-| 4 | Hybrid retrieval: BM25 + dense + RRF, `/search` endpoint |
-| 5 | 1-hop graph expansion, Cohere reranker, LLM triage, `/triage` endpoint |
-| 6 | Webhook → Celery → GitHub comment end-to-end, `push` incremental index |
-| 7 | Eval harness, precision/recall metrics, baseline report |
-| 8 | Confidence calibration, incremental indexing, Redis semantic cache |
-| 9 | Next.js 14 App Router dashboard: repo list, issue view, triage detail |
-| 10 | Test suite cleanup, CORS, full Docker stack, smoke tests, multi-LLM support |
+| 1 ✅ | Scaffold, Docker Compose, webhook verification, ORM schema, Alembic migrations |
+| 2 ✅ | Backfill pipeline: issues, PRs, commits, files, graph edges |
+| 3 ✅ | Tree-sitter chunkers, Voyage AI embeddings, `index_repo` Celery task |
+| 4 ✅ | Hybrid retrieval: BM25 + dense + RRF, `/search` endpoint |
+| 5 ✅ | 1-hop graph expansion, Cohere reranker, LLM triage, `/triage` endpoint |
+| 6 ✅ | Webhook → Celery → GitHub comment end-to-end, `push` incremental index |
+| 7 ✅ | Eval harness — Label F1=0.967, P=0.950, R=1.000 on 10 issues |
+| 8 ✅ | Confidence calibration, incremental indexing, Redis semantic cache |
+| 9 ✅ | Next.js 14 App Router dashboard: repo list, issue view, triage detail |
+| 10 ✅ | 150/150 tests passing, CORS, full Docker stack, smoke tests, multi-LLM support |
