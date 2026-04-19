@@ -21,7 +21,8 @@ from app.core.config import settings
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_pre_ping=True,  # Reconnect if Postgres dropped the connection
+    pool_pre_ping=True,
+    connect_args={"statement_cache_size": 0},  # Required for Supabase pgbouncer in transaction mode
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -40,7 +41,8 @@ def make_worker_session() -> async_sessionmaker:
     NullPool avoids this by never reusing connections across asyncio.run() calls.
     """
     worker_engine = create_async_engine(
-        settings.database_url, poolclass=NullPool, pool_pre_ping=False
+        settings.database_url, poolclass=NullPool, pool_pre_ping=False,
+        connect_args={"statement_cache_size": 0},
     )
     return async_sessionmaker(worker_engine, expire_on_commit=False)
 
