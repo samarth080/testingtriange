@@ -18,12 +18,18 @@ from app.core.config import settings
 
 
 def _load_private_key() -> str:
-    """Load the GitHub App RSA private key from the configured path."""
+    """Load the GitHub App RSA private key.
+
+    Checks GITHUB_PRIVATE_KEY env var first (for cloud deploys where there is
+    no writable filesystem), then falls back to GITHUB_PRIVATE_KEY_PATH.
+    """
+    if settings.github_private_key:
+        return settings.github_private_key
     key_path = Path(settings.github_private_key_path)
     if not key_path.exists():
         raise FileNotFoundError(
             f"GitHub App private key not found at {key_path}. "
-            "Download it from your GitHub App settings page."
+            "Set GITHUB_PRIVATE_KEY env var or download the .pem to that path."
         )
     return key_path.read_text()
 

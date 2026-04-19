@@ -31,7 +31,7 @@ async def search_endpoint(
     session: AsyncSession = Depends(get_db),
 ) -> list[dict]:
     embedder = embedder_from_settings()
-    qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension)
+    qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension, api_key=settings.qdrant_api_key)
     results = await retrieve(
         session=session,
         qdrant=qdrant,

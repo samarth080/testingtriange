@@ -38,8 +38,8 @@ def point_id(repo_id: int, source_type: str, source_id: int, chunk_index: int) -
 
 
 class QdrantStore:
-    def __init__(self, url: str, vector_dim: int) -> None:
-        self._client = AsyncQdrantClient(url=url)
+    def __init__(self, url: str, vector_dim: int, api_key: str = "") -> None:
+        self._client = AsyncQdrantClient(url=url, api_key=api_key or None)
         self._dim = vector_dim
 
     async def ensure_collections(self) -> None:

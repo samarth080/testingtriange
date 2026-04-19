@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # ── GitHub App ────────────────────────────────────────────────────────────
     github_app_id: str = ""
     github_private_key_path: str = "./certs/github-app.pem"
+    github_private_key: str = ""   # raw PEM content — takes priority over path
     github_webhook_secret: str = ""
 
     # ── Database ──────────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
 
     # ── Qdrant ────────────────────────────────────────────────────────────────
     qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str = ""
 
     # ── Embeddings (optional — auto-detected at startup) ──────────────────────
     voyage_api_key: str = ""

@@ -50,7 +50,7 @@ async def _async_triage_issue(repo_id: int, issue_id: int) -> dict:
         logger.info("Triaging issue #%d for %s/%s", issue.github_number, repo.owner, repo.name)
 
         embedder = embedder_from_settings()
-        qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension)
+        qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension, api_key=settings.qdrant_api_key)
         cache = SemanticCache(redis_url=settings.redis_url, ttl=settings.semantic_cache_ttl)
 
         try:
