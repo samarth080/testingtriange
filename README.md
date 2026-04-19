@@ -213,13 +213,21 @@ pytest tests/ -m integration -v     # requires live Postgres + Qdrant
 ./scripts/smoke_test.sh             # requires docker compose up
 ```
 
-## Manual Backfill
+## Manual Backfill / Indexing
 
+**Local (docker compose):**
 ```bash
 docker compose exec worker python -c "
 from app.workers.ingestion_tasks import backfill_repo
 backfill_repo.delay(1)  # repo_id from the repos table
 "
+```
+
+**Production (admin API):**
+```bash
+curl https://your-service.onrender.com/admin/repos          # list repos + IDs
+curl -X POST https://your-service.onrender.com/admin/backfill/1  # backfill + index
+curl -X POST https://your-service.onrender.com/admin/index/1     # re-index only
 ```
 
 ## Running the Full Stack
@@ -233,13 +241,55 @@ Qdrant UI:     http://localhost:6333/dashboard
 
 ## Deployment
 
+The live stack runs on:
+
 | Service | Platform |
 |---|---|
-| Backend + Worker | Railway / Render / Fly.io |
-| Qdrant | Hetzner VPS or Qdrant Cloud |
+| Backend + Worker | Render (free web service — FastAPI + Celery in one container via `start.sh`) |
+| Qdrant | Qdrant Cloud |
 | Frontend | Vercel |
-| Redis | Upstash |
-| Postgres | Supabase / Railway |
+| Redis | Upstash (TLS — use `rediss://` URL) |
+| Postgres | Supabase (transaction pooler, port 6543) |
+
+### Render
+
+1. Connect repo → **New Web Service** → Docker runtime
+2. Set `dockerfilePath: ./backend/Dockerfile`, `dockerContext: ./backend`
+3. Add all env vars listed below
+
+**Required environment variables:**
+
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` | Supabase transaction pooler URL (`postgresql+asyncpg://...@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres`) |
+| `REDIS_URL` | Upstash TLS URL (`rediss://...upstash.io:6379`) |
+| `QDRANT_URL` | Qdrant Cloud cluster URL |
+| `QDRANT_API_KEY` | Qdrant Cloud API key |
+| `GITHUB_APP_ID` | GitHub App ID |
+| `GITHUB_PRIVATE_KEY` | Full PEM content including `-----BEGIN RSA PRIVATE KEY-----` header/footer with real newlines |
+| `GITHUB_WEBHOOK_SECRET` | Webhook secret |
+| `VOYAGE_API_KEY` | Voyage AI key |
+| `GROQ_API_KEY` | Groq key (or set `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`) |
+| `ANTHROPIC_API_KEY` | Optional — used if Groq key absent |
+| `MIN_CONFIDENCE` | `low` (always comment) \| `medium` \| `high` |
+| `CORS_ORIGINS` | Your Vercel frontend URL |
+
+> **Supabase note:** Use the **Transaction pooler** URL (port 6543, host `aws-1-ap-southeast-1.pooler.supabase.com`). Direct connections use IPv6 which Render free tier doesn't support.
+
+> **PEM note:** Paste the full PEM block including header/footer lines. Render preserves newlines if you paste directly into the env var field.
+
+### After first deploy — run migrations and backfill
+
+```bash
+# Run DB migrations via Supabase SQL Editor or psql
+# (paste contents of each migration file in order)
+
+# Then trigger backfill + indexing via the admin API:
+curl https://your-service.onrender.com/admin/repos           # find repo_id
+curl -X POST https://your-service.onrender.com/admin/backfill/1
+```
+
+The backfill task automatically chains into `index_repo` on completion.
 
 ## Progress
 
