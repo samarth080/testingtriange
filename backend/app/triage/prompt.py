@@ -21,7 +21,7 @@ Rules:
 - duplicate_of: the github_number of an existing issue if this is a duplicate, else null
 - labels: only suggest labels that appear in the retrieved context; max 5
 - relevant_files: file paths that likely need changes to fix this issue; max 10
-- suggested_assignees: github logins of people who worked on relevant files or issues
+- suggested_assignees: github logins of people who worked on relevant files or issues; leave empty [] if no real logins appear in the retrieved context — never invent or guess usernames
 - confidence: your overall certainty about this triage decision
 - reasoning: 2-4 sentences explaining the key evidence and your decision
 """
