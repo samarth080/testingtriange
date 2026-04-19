@@ -73,7 +73,7 @@ async def _run(repo_slug: str, limit: int, state: str, output: str) -> None:
         print(f"Evaluating {len(issues)} issues from {repo_slug} (state={state!r}) ...")
 
         embedder = embedder_from_settings()
-        qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension)
+        qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension, api_key=settings.qdrant_api_key)
 
         per_issue: list[dict] = []
         for i, issue in enumerate(issues, start=1):
@@ -88,6 +88,8 @@ async def _run(repo_slug: str, limit: int, state: str, output: str) -> None:
                 f"F1={record['f1']:.2f}  conf={record['confidence']:<6}  "
                 f"latency={record['latency_ms']}ms"
             )
+            if i < len(issues):
+                await asyncio.sleep(22)  # Voyage free tier: 3 RPM limit
 
     agg = aggregate_metrics(per_issue)
     report = format_report(repo_slug, per_issue, agg)
