@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import ssl
+import urllib.parse
 
 import redis.asyncio as aioredis
 
@@ -22,7 +24,18 @@ logger = logging.getLogger(__name__)
 
 class SemanticCache:
     def __init__(self, redis_url: str, ttl: int = 3600) -> None:
-        self._client: aioredis.Redis = aioredis.from_url(redis_url, decode_responses=True)
+        # Strip ssl_cert_reqs from the URL (redis-py rejects "CERT_NONE" as a value)
+        # and instead pass it as an explicit kwarg for rediss:// connections.
+        parsed = urllib.parse.urlparse(redis_url)
+        qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        qs.pop("ssl_cert_reqs", None)
+        clean_url = parsed._replace(query=urllib.parse.urlencode(qs, doseq=True)).geturl()
+
+        kwargs: dict = {"decode_responses": True}
+        if redis_url.startswith("rediss://"):
+            kwargs["ssl_cert_reqs"] = ssl.CERT_NONE
+
+        self._client: aioredis.Redis = aioredis.from_url(clean_url, **kwargs)
         self._ttl = ttl
 
     def cache_key(self, repo_id: int, query: str) -> str:

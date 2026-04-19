@@ -10,7 +10,7 @@ import logging
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import make_worker_session
 from app.core.github_auth import get_installation_token
 from app.indexing.embedder import embedder_from_settings
 from app.indexing.pipeline import index_repo_discussions, index_repo_files
@@ -27,7 +27,7 @@ async def _async_index_repo(repo_id: int) -> dict:
     qdrant = QdrantStore(url=settings.qdrant_url, vector_dim=embedder.dimension, api_key=settings.qdrant_api_key)
     await qdrant.ensure_collections()
 
-    async with AsyncSessionLocal() as session:
+    async with make_worker_session()() as session:
         result = await session.execute(select(Repo).where(Repo.id == repo_id))
         repo = result.scalar_one_or_none()
         if not repo:

@@ -13,7 +13,7 @@ import logging
 
 from sqlalchemy import select
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import make_worker_session
 from app.core.github_auth import get_installation_token
 from app.ingestion.github_client import GitHubClient
 from app.ingestion.fetchers import (
@@ -43,7 +43,7 @@ async def _async_backfill_repo(repo_id: int) -> dict:
     Issues must come before PRs so issue_pr edges can reference existing issue rows.
     Returns a summary dict with counts per entity type.
     """
-    async with AsyncSessionLocal() as session:
+    async with make_worker_session()() as session:
         result = await session.execute(select(Repo).where(Repo.id == repo_id))
         repo = result.scalar_one_or_none()
         if not repo:
