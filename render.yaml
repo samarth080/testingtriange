@@ -34,10 +34,9 @@ services:
   - type: worker
     name: triagecopilot-worker
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
+    dockerfilePath: ./backend/Dockerfile.worker
     dockerContext: ./backend
     plan: free
-    startCommand: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
     envVars:
       - key: DATABASE_URL
         sync: false
