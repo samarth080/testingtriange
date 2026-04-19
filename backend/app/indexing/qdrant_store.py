@@ -19,6 +19,7 @@ from qdrant_client.models import (
     Filter,
     FilterSelector,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -51,6 +52,12 @@ class QdrantStore:
                     vectors_config=VectorParams(size=self._dim, distance=Distance.COSINE),
                 )
                 logger.info("Created Qdrant collection: %s (dim=%d)", name, self._dim)
+            # Ensure payload index on repo_id for filtered search (idempotent)
+            await self._client.create_payload_index(
+                collection_name=name,
+                field_name="repo_id",
+                field_schema=PayloadSchemaType.INTEGER,
+            )
 
     async def upsert_points(self, collection: str, points: list[dict]) -> None:
         if not points:
